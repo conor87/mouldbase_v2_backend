@@ -56,6 +56,7 @@ class Mould(Base):
     # w models/mould.py (klasa Mould)
     changeovers_from = relationship("Changeover", foreign_keys="Changeover.from_mould_id", back_populates="from_mould", cascade="all, delete-orphan")
     changeovers_to   = relationship("Changeover", foreign_keys="Changeover.to_mould_id", back_populates="to_mould", cascade="all, delete-orphan")
+    calendar_entries = relationship("CalendarEntry", back_populates="mould", cascade="all, delete-orphan")
 
 
     def name_with_year(self):
