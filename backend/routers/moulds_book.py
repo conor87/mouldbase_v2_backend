@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Path, status
 from sqlalchemy.orm import Session
 from typing import Optional, List
+from datetime import date, datetime
 
 from db.database import SessionLocal, db_dependency
 from models.moulds_book import MouldsBook
@@ -20,6 +21,24 @@ def get_db():
         db.close()
 
 
+def parse_date_or_none(value: Optional[str]) -> Optional[date]:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        try:
+            return datetime.fromisoformat(raw).date()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid created date format. Use YYYY-MM-DD.",
+            ) from exc
+
+
 # -------------------------
 # CREATE (POST /book/)
 # -------------------------
@@ -29,6 +48,7 @@ async def create_book_entry(
     sv: int = Form(0),
     tpm_type: int = Form(0),
     status: int = Form(0),
+    created: Optional[str] = Form(None),
     opis_zgloszenia: Optional[str] = Form(None),
     ido: int = Form(0),
     czas_trwania: int = Form(0),
@@ -56,6 +76,8 @@ async def create_book_entry(
     elif extra_photo_2_path:
         photo2_url = extra_photo_2_path
 
+    created_date = parse_date_or_none(created)
+
     book = MouldsBook(
         mould_id=mould_id,
         sv=sv,
@@ -68,6 +90,8 @@ async def create_book_entry(
         extra_photo_1=photo1_url,
         extra_photo_2=photo2_url,
     )
+    if created_date is not None:
+        book.created = created_date
 
     db.add(book)
     db.commit()
@@ -119,6 +143,7 @@ async def update_book_entry(
     sv: Optional[int] = Form(None),
     tpm_type: Optional[int] = Form(None),
     status: Optional[int] = Form(None),
+    created: Optional[str] = Form(None),
     opis_zgloszenia: Optional[str] = Form(None),
     ido: Optional[int] = Form(None),
     czas_trwania: Optional[int] = Form(None),
@@ -143,6 +168,10 @@ async def update_book_entry(
         entry.tpm_type = tpm_type
     if status is not None:
         entry.status = status
+    if created is not None:
+        created_date = parse_date_or_none(created)
+        if created_date is not None:
+            entry.created = created_date
     if opis_zgloszenia is not None:
         entry.opis_zgloszenia = opis_zgloszenia
     if ido is not None:

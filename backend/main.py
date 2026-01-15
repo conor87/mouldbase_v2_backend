@@ -22,6 +22,8 @@ from models.calendar import CalendarEntry  # wa‘•ne przed create_all
 from routers.calendar import router as calendar_router
 from models.calendar_log import CalendarLog  # wa‘•ne przed create_all
 from routers.calendar_log import router as calendar_log_router
+from models.production import MachineStatus, OrderType, ProductionOrder, ProductionTask, Workstation, Operation, OperationLog
+from routers.production import router as production_router
 
 app = FastAPI()
 
@@ -63,6 +65,7 @@ app.include_router(changeovers_router)
 app.include_router(changeovers_log_router)
 app.include_router(calendar_router)
 app.include_router(calendar_log_router)
+app.include_router(production_router)
 
 
 
