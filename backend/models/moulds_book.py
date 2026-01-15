@@ -9,6 +9,7 @@ class TpmType(IntEnum):
     AWARIA = 0
     TPM = 1
     PRZEZBROJENIE = 2
+    
 
 class MouldsBook(Base):
     __tablename__ = "mouldbase_mouldsbook"

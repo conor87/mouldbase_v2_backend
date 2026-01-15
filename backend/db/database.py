@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 # ZMIANA: URL PostgreSQL
 # URL_DATABASE = "postgresql+psycopg2://postgres:228100@192.168.88.115:5432/mouldbase" #home
-URL_DATABASE = "postgresql+psycopg2://postgres:228100@localhost:5432/mouldbase" #home2
-# URL_DATABASE = "postgresql+psycopg2://postgres:123456@localhost:5432/moldbase" #lamela
+#URL_DATABASE = "postgresql+psycopg2://postgres:228100@localhost:5432/mouldbase" #home2
+URL_DATABASE = "postgresql+psycopg2://postgres:123456@10.10.77.75:5432/mouldbase" #lamela
 
 engine = create_engine(
     URL_DATABASE,

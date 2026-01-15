@@ -22,6 +22,7 @@ class MouldsBookRead(MouldsBookBase):
     id: int
     mould_id: int
     created: date
+    tpm_type: int = 0
     czas_trwania: Optional[int] = 0
     czas_wylaczenia: Optional[int] = 0
     extra_photo_1: Optional[str] = None
