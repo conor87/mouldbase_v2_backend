@@ -93,7 +93,7 @@ class RoleChecker:
             )
 
 
-admin_required = RoleChecker(["admin", "superadmin"])
+admin_required = RoleChecker(["admin", "admindn", "superadmin"])
 superadmin_required = RoleChecker(["superadmin"])
 
 
