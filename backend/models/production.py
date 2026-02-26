@@ -11,9 +11,19 @@ class MachineStatus(Base):
     id = Column(Integer, primary_key=True, index=True)
     status_no = Column(Integer, nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False, unique=True)
+    color = Column(String(30), nullable=True)
 
     workstations = relationship("Workstation", back_populates="status")
     operation_logs = relationship("OperationLog", back_populates="status")
+
+
+class MachineGroup(Base):
+    __tablename__ = "machine_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, unique=True)
+
+    workstations = relationship("Workstation", back_populates="machine_group")
 
 
 class OrderType(Base):
@@ -63,11 +73,15 @@ class Workstation(Base):
     cost_center = Column(String(50), nullable=True)
     status_id = Column(Integer, ForeignKey("machine_statuses.id"), nullable=True)
     current_task_id = Column(Integer, ForeignKey("production_tasks.id", ondelete="SET NULL"), nullable=True)
+    current_operation_id = Column(Integer, ForeignKey("operations.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    machine_group_id = Column(Integer, ForeignKey("machine_groups.id"), nullable=True)
 
     status = relationship("MachineStatus", back_populates="workstations")
+    machine_group = relationship("MachineGroup", back_populates="workstations")
     current_task = relationship("ProductionTask", back_populates="current_on_workstations")
-    operations = relationship("Operation", back_populates="workstation")
+    current_operation = relationship("Operation", foreign_keys=[current_operation_id])
+    operations = relationship("Operation", back_populates="workstation", foreign_keys="[Operation.workstation_id]")
     logs = relationship("OperationLog", back_populates="workstation")
 
 
@@ -85,10 +99,11 @@ class Operation(Base):
     is_started = Column(Boolean, nullable=False, default=False)
     duration_total_min = Column(Integer, nullable=False, default=0)
     duration_shift_min = Column(Integer, nullable=False, default=0)
+    sort_order = Column(Integer, nullable=False, default=999)
     workstation_id = Column(Integer, ForeignKey("workstations.id", ondelete="SET NULL"), nullable=True)
 
     task = relationship("ProductionTask", back_populates="operations")
-    workstation = relationship("Workstation", back_populates="operations")
+    workstation = relationship("Workstation", back_populates="operations", foreign_keys=[workstation_id])
     logs = relationship("OperationLog", back_populates="operation", cascade="all, delete-orphan")
 
 

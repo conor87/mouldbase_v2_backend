@@ -22,8 +22,9 @@ from models.calendar import CalendarEntry  # wa‘•ne przed create_all
 from routers.calendar import router as calendar_router
 from models.calendar_log import CalendarLog  # wa‘•ne przed create_all
 from routers.calendar_log import router as calendar_log_router
-from models.production import MachineStatus, OrderType, ProductionOrder, ProductionTask, Workstation, Operation, OperationLog
+from models.production import MachineGroup, MachineStatus, OrderType, ProductionOrder, ProductionTask, Workstation, Operation, OperationLog
 from routers.production import router as production_router
+from routers.service import router as service_router
 from routers.current_sv import router as current_sv_router
 
 app = FastAPI()
@@ -45,6 +46,7 @@ origins = [
     "http://127.0.0.1:4173",
     "http://10.10.77.75:5173",
     "http://10.10.77.75:4173",
+    "http://192.168.1.29:5173",
 ]
 
 app.add_middleware(
@@ -67,6 +69,7 @@ app.include_router(changeovers_log_router)
 app.include_router(calendar_router)
 app.include_router(calendar_log_router)
 app.include_router(production_router)
+app.include_router(service_router)
 app.include_router(current_sv_router)
 
 

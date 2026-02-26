@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 class MachineStatusBase(BaseModel):
     status_no: int
     name: str
+    color: Optional[str] = None
 
 
 class MachineStatusCreate(MachineStatusBase):
@@ -16,6 +17,7 @@ class MachineStatusCreate(MachineStatusBase):
 class MachineStatusUpdate(BaseModel):
     status_no: Optional[int] = None
     name: Optional[str] = None
+    color: Optional[str] = None
 
 
 class MachineStatusRead(MachineStatusBase):
@@ -92,12 +94,28 @@ class ProductionTaskRead(ProductionTaskBase):
     id: int
 
 
+
+class MachineGroupBase(BaseModel):
+    name: str
+
+
+class MachineGroupCreate(MachineGroupBase):
+    pass
+
+
+class MachineGroupRead(MachineGroupBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+
+
 class WorkstationBase(BaseModel):
     name: str
     cost_center: Optional[str] = None
     status_id: Optional[int] = None
     current_task_id: Optional[int] = None
+    current_operation_id: Optional[int] = None
     user_id: Optional[int] = None
+    machine_group_id: Optional[int] = None
 
 
 class WorkstationCreate(WorkstationBase):
@@ -109,12 +127,15 @@ class WorkstationUpdate(BaseModel):
     cost_center: Optional[str] = None
     status_id: Optional[int] = None
     current_task_id: Optional[int] = None
+    current_operation_id: Optional[int] = None
     user_id: Optional[int] = None
+    machine_group_id: Optional[int] = None
 
 
 class WorkstationRead(WorkstationBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    machine_group: Optional[MachineGroupRead] = None
 
 
 class OperationBase(BaseModel):
@@ -128,6 +149,7 @@ class OperationBase(BaseModel):
     is_started: bool = False
     duration_total_min: int = 0
     duration_shift_min: int = 0
+    sort_order: int = 999
     workstation_id: Optional[int] = None
 
 
@@ -146,12 +168,22 @@ class OperationUpdate(BaseModel):
     is_started: Optional[bool] = None
     duration_total_min: Optional[int] = None
     duration_shift_min: Optional[int] = None
+    sort_order: Optional[int] = None
     workstation_id: Optional[int] = None
 
 
 class OperationRead(OperationBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+
+
+class OperationReorderItem(BaseModel):
+    id: int
+    sort_order: int
+
+
+class OperationReorderRequest(BaseModel):
+    items: List[OperationReorderItem]
 
 
 class OperationLogBase(BaseModel):
