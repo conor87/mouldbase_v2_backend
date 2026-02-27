@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -85,6 +86,8 @@ async def list_service_logs(db: db_dependency):
 @router.post("/logs", response_model=ServiceLogRead, dependencies=[Depends(user_required)])
 async def create_service_log(payload: ServiceLogCreate, db: db_dependency):
     data = payload.model_dump()
+    if not data.get("created_at"):
+        data["created_at"] = datetime.now().isoformat()
     obj = ServiceLog(**data)
     db.add(obj)
     commit_or_409(db, "Service log could not be created")

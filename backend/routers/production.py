@@ -426,6 +426,8 @@ async def list_logs(db: db_dependency, operation_id: Optional[int] = None):
 @router.post("/logs", response_model=OperationLogRead, dependencies=[Depends(user_required)])
 async def create_log(payload: OperationLogCreate, db: db_dependency):
     data = payload.model_dump()
+    if data.get("created_at") is None:
+        data["created_at"] = datetime.now()
     require_row(db, Operation, data["operation_id"], "Operation")
     if data.get("status_id") is not None:
         require_row(db, MachineStatus, data["status_id"], "Machine status")
