@@ -90,7 +90,7 @@ def recalculate_operation_durations(db: Session, operation_id: int) -> None:
             shift_start = log.created_at
             break
 
-    now = datetime.utcnow()
+    now = datetime.now()
     total_seconds = 0.0
     shift_seconds = 0.0
 
