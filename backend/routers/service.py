@@ -54,7 +54,7 @@ async def create_service_workstation(payload: ServiceWorkstationCreate, db: db_d
     return obj
 
 
-@router.put("/workstations/{workstation_id}", response_model=ServiceWorkstationRead, dependencies=[Depends(admin_required)])
+@router.put("/workstations/{workstation_id}", response_model=ServiceWorkstationRead, dependencies=[Depends(user_required)])
 async def update_service_workstation(workstation_id: int, payload: ServiceWorkstationUpdate, db: db_dependency):
     obj = require_row(db, ServiceWorkstation, workstation_id, "Service workstation")
     data = payload.model_dump(exclude_unset=True)
