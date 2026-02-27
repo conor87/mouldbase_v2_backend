@@ -5,13 +5,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.database import db_dependency
-from models.service import ServiceWorkstation
+from models.service import ServiceWorkstation, ServiceLog
 from models.user import Users
 from routers.auth import user_required, admin_required, superadmin_required
 from schemas.service import (
     ServiceWorkstationCreate,
     ServiceWorkstationUpdate,
     ServiceWorkstationRead,
+    ServiceLogCreate,
+    ServiceLogUpdate,
+    ServiceLogRead,
 )
 
 router = APIRouter(prefix="/service", tags=["service"])
@@ -69,4 +72,40 @@ async def delete_service_workstation(workstation_id: int, db: db_dependency):
     obj = require_row(db, ServiceWorkstation, workstation_id, "Service workstation")
     db.delete(obj)
     commit_or_409(db, "Service workstation could not be deleted")
+    return
+
+
+# ─── Service Logs ───────────────────────────────────────────────────────────
+
+@router.get("/logs", response_model=List[ServiceLogRead])
+async def list_service_logs(db: db_dependency):
+    return db.query(ServiceLog).order_by(ServiceLog.id.desc()).all()
+
+
+@router.post("/logs", response_model=ServiceLogRead, dependencies=[Depends(user_required)])
+async def create_service_log(payload: ServiceLogCreate, db: db_dependency):
+    data = payload.model_dump()
+    obj = ServiceLog(**data)
+    db.add(obj)
+    commit_or_409(db, "Service log could not be created")
+    db.refresh(obj)
+    return obj
+
+
+@router.put("/logs/{log_id}", response_model=ServiceLogRead, dependencies=[Depends(admin_required)])
+async def update_service_log(log_id: int, payload: ServiceLogUpdate, db: db_dependency):
+    obj = require_row(db, ServiceLog, log_id, "Service log")
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(obj, key, value)
+    commit_or_409(db, "Service log could not be updated")
+    db.refresh(obj)
+    return obj
+
+
+@router.delete("/logs/{log_id}", status_code=204, dependencies=[Depends(admin_required)])
+async def delete_service_log(log_id: int, db: db_dependency):
+    obj = require_row(db, ServiceLog, log_id, "Service log")
+    db.delete(obj)
+    commit_or_409(db, "Service log could not be deleted")
     return

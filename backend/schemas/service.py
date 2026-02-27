@@ -32,3 +32,32 @@ class ServiceWorkstationUpdate(BaseModel):
 class ServiceWorkstationRead(ServiceWorkstationBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+
+
+# ─── Service Log ──────────────────────────────────────────────────────────────
+
+class ServiceLogBase(BaseModel):
+    operator: Optional[str] = None
+    created_at: Optional[str] = None
+    status_service: Optional[str] = None
+    mes_activ_service_id: Optional[int] = None
+    mes_activ_changeover_id: Optional[int] = None
+    status_changeover: Optional[str] = None
+
+
+class ServiceLogCreate(ServiceLogBase):
+    pass
+
+
+class ServiceLogUpdate(BaseModel):
+    operator: Optional[str] = None
+    created_at: Optional[str] = None
+    status_service: Optional[str] = None
+    mes_activ_service_id: Optional[int] = None
+    mes_activ_changeover_id: Optional[int] = None
+    status_changeover: Optional[str] = None
+
+
+class ServiceLogRead(ServiceLogBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
