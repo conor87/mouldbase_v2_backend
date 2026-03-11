@@ -95,6 +95,7 @@ class RoleChecker:
 
 user_required = RoleChecker(["user", "userdn", "admin", "admindn", "superadmin"])
 admin_required = RoleChecker(["admin", "admindn", "superadmin"])
+editor_required = RoleChecker(["userdn", "admin", "admindn", "superadmin"])
 superadmin_required = RoleChecker(["superadmin"])
 
 

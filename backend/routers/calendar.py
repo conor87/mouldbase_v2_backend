@@ -14,7 +14,7 @@ from models.mould import Mould
 from schemas.calendar import CalendarRead
 
 # auth
-from routers.auth import user_dependency, admin_required
+from routers.auth import user_dependency, editor_required
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
@@ -100,7 +100,7 @@ def add_log(
     db.add(log)
 
 
-@router.post("/", response_model=CalendarRead, dependencies=[Depends(admin_required)])
+@router.post("/", response_model=CalendarRead, dependencies=[Depends(editor_required)])
 async def create_calendar_entry(
     mould_id: int = Form(...),
     start_date: Optional[str] = Form(None),
@@ -172,7 +172,7 @@ async def get_calendar_entry(
     return entry
 
 
-@router.put("/{entry_id}", response_model=CalendarRead, dependencies=[Depends(admin_required)])
+@router.put("/{entry_id}", response_model=CalendarRead, dependencies=[Depends(editor_required)])
 async def update_calendar_entry(
     entry_id: int,
     mould_id: Optional[int] = Form(None),
@@ -227,7 +227,7 @@ async def update_calendar_entry(
     return entry
 
 
-@router.delete("/{entry_id}", status_code=204, dependencies=[Depends(admin_required)])
+@router.delete("/{entry_id}", status_code=204, dependencies=[Depends(editor_required)])
 async def delete_calendar_entry(
     entry_id: int,
     db: Session = Depends(get_db),
