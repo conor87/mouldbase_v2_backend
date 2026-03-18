@@ -56,3 +56,32 @@ class MachineCardResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     machines: List[MachineCard]
+
+
+# --- Service analytics ---
+
+class ServiceEntry(BaseModel):
+    activity_type: str
+    activity_label: Optional[str] = None
+    mould_number: Optional[str] = None
+    minutes: int
+
+
+class ServiceCard(BaseModel):
+    user_id: int
+    username: str
+    source: str  # "saved" or "logs"
+    entries: List[ServiceEntry]
+    total_minutes: int
+
+
+class ServiceCardSave(BaseModel):
+    user_id: int
+    date: date
+    entries: List[ServiceEntry]
+
+
+class ServiceCardResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    date: date
+    workers: List[ServiceCard]

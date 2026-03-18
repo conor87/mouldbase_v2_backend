@@ -43,6 +43,7 @@ class ServiceLogBase(BaseModel):
     mes_activ_service_id: Optional[int] = None
     mes_activ_changeover_id: Optional[int] = None
     status_changeover: Optional[str] = None
+    mould_number: Optional[str] = None
 
 
 class ServiceLogCreate(ServiceLogBase):
@@ -56,6 +57,7 @@ class ServiceLogUpdate(BaseModel):
     mes_activ_service_id: Optional[int] = None
     mes_activ_changeover_id: Optional[int] = None
     status_changeover: Optional[str] = None
+    mould_number: Optional[str] = None
 
 
 class ServiceLogRead(ServiceLogBase):

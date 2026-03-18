@@ -12,7 +12,15 @@
       "mcp__serena__search_for_pattern",
       "mcp__serena__think_about_whether_you_are_done",
       "Bash(grep:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git config:*)",
+      "Bash(git add:*)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Bash(git checkout:*)"
     ]
   }
 }

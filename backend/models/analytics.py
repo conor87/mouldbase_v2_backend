@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Date, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -34,4 +34,21 @@ class AnalyticaMachines(Base):
 
     __table_args__ = (
         UniqueConstraint("workstation_id", "date", "operation_id", name="uq_ws_date_operation"),
+    )
+
+
+class AnalyticaService(Base):
+    __tablename__ = "analytica_service"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    date = Column(Date, nullable=False, index=True)
+    activity_type = Column(String(100), nullable=False)
+    mould_number = Column(String(50), nullable=True)
+    minutes = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", "activity_type", "mould_number", name="uq_user_date_activity_mould"),
     )

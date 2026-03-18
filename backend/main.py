@@ -26,7 +26,7 @@ from models.production import MachineGroup, MachineStatus, OrderType, Production
 from routers.production import router as production_router
 from routers.service import router as service_router
 from routers.current_sv import router as current_sv_router
-from models.analytics import AnalyticaWorkers, AnalyticaMachines  # before create_all
+from models.analytics import AnalyticaWorkers, AnalyticaMachines, AnalyticaService  # before create_all
 from routers.analytics import router as analytics_router
 from models.mes_session import MesSessionLog  # before create_all
 from routers.mes_session import router as mes_session_router

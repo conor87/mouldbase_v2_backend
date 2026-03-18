@@ -6,12 +6,14 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from db.database import db_dependency
-from models.analytics import AnalyticaMachines, AnalyticaWorkers
+from models.analytics import AnalyticaMachines, AnalyticaService, AnalyticaWorkers
 from models.production import MachineStatus, Operation, OperationLog, ProductionOrder, ProductionTask, Workstation
+from models.service import ServiceLog
 from models.user import Users
 from routers.auth import admin_required, user_required
 from schemas.analytics import (
     MachineCard, MachineCardResponse, MachineCardSave, MachineEntry,
+    ServiceCard, ServiceCardResponse, ServiceCardSave, ServiceEntry,
     WorkerCard, WorkerCardResponse, WorkerCardSave, WorkerEntry,
 )
 
@@ -354,3 +356,180 @@ async def reset_machine_card(
 
     db.commit()
     return {"message": f"Deleted {deleted} entries", "workstation_id": workstation_id, "date": str(target_date)}
+
+
+# ==================== Service cards ====================
+
+SKIP_SERVICE_STATUSES = {"Koniec działań", "Wylogowanie"}
+
+
+def _parse_service_dt(s: str) -> Optional[datetime]:
+    """Parse service log created_at string, handling Z suffix and milliseconds."""
+    if not s:
+        return None
+    try:
+        cleaned = s.replace("Z", "") if s.endswith("Z") else s
+        dt = datetime.fromisoformat(cleaned)
+        return dt.replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return None
+
+
+def _compute_service_from_logs(db: Session, target_date: date) -> dict:
+    """
+    Compute service worker time per (activity_type, mould_number) from service_logs.
+    Sequential processing: count time between consecutive logs per operator.
+    Skip "Koniec działań" and "Wylogowanie" entries (no timer).
+    Returns {operator_username: {(activity_type, mould_number): minutes}}.
+    """
+    day_start_str = target_date.isoformat()
+    day_end_str = (target_date + timedelta(days=1)).isoformat()
+
+    logs = (
+        db.query(ServiceLog)
+        .filter(ServiceLog.created_at >= day_start_str, ServiceLog.created_at < day_end_str)
+        .filter(ServiceLog.operator.isnot(None))
+        .filter(ServiceLog.status_service.isnot(None))
+        .order_by(ServiceLog.operator, ServiceLog.created_at)
+        .all()
+    )
+
+    op_logs = {}
+    for log in logs:
+        op_logs.setdefault(log.operator, []).append(log)
+
+    result = {}
+    for operator, o_logs in op_logs.items():
+        activity_minutes = {}
+        for i in range(len(o_logs) - 1):
+            current = o_logs[i]
+            if current.status_service in SKIP_SERVICE_STATUSES:
+                continue
+            next_log = o_logs[i + 1]
+            t1 = _parse_service_dt(current.created_at)
+            t2 = _parse_service_dt(next_log.created_at)
+            if not t1 or not t2:
+                continue
+            delta = (t2 - t1).total_seconds() / 60.0
+            if delta > 720:  # 12h safety cap
+                delta = 0
+            key = (current.status_service, getattr(current, "mould_number", None))
+            activity_minutes[key] = activity_minutes.get(key, 0) + delta
+        for (activity, mould), mins in activity_minutes.items():
+            mins = round(mins)
+            if mins > 0:
+                result.setdefault(operator, {})[(activity, mould)] = mins
+
+    return result
+
+
+def _build_service_label(activity_type: str, mould_number: str = None) -> str:
+    if mould_number:
+        return f"{activity_type} — {mould_number}"
+    return activity_type
+
+
+@router.get("/service-cards", response_model=ServiceCardResponse, dependencies=[Depends(admin_required)])
+async def get_service_cards(target_date: date = Query(..., alias="date"), db: db_dependency = None):
+    users = db.query(Users.id, Users.username).all()
+    user_map = {u.id: u.username for u in users}
+    username_to_id = {u.username: u.id for u in users}
+
+    saved = db.query(AnalyticaService).filter(AnalyticaService.date == target_date).all()
+    saved_by_user = {}
+    for row in saved:
+        saved_by_user.setdefault(row.user_id, []).append(row)
+
+    log_data = _compute_service_from_logs(db, target_date)
+
+    # Map log_data from username keys to user_id keys
+    log_by_user = {}
+    for username, activities in log_data.items():
+        uid = username_to_id.get(username)
+        if uid:
+            log_by_user[uid] = activities
+
+    workers = []
+    all_user_ids = set(saved_by_user.keys()) | set(log_by_user.keys())
+
+    for user_id in sorted(all_user_ids):
+        username = user_map.get(user_id, f"User #{user_id}")
+
+        if user_id in saved_by_user:
+            entries = [
+                ServiceEntry(
+                    activity_type=row.activity_type,
+                    activity_label=_build_service_label(row.activity_type, row.mould_number),
+                    mould_number=row.mould_number,
+                    minutes=row.minutes,
+                )
+                for row in saved_by_user[user_id]
+            ]
+            source = "saved"
+        elif user_id in log_by_user:
+            entries = [
+                ServiceEntry(
+                    activity_type=activity,
+                    activity_label=_build_service_label(activity, mould),
+                    mould_number=mould,
+                    minutes=mins,
+                )
+                for (activity, mould), mins in log_by_user[user_id].items()
+            ]
+            source = "logs"
+        else:
+            continue
+
+        total = sum(e.minutes for e in entries)
+        if total > 0:
+            workers.append(ServiceCard(
+                user_id=user_id,
+                username=username,
+                source=source,
+                entries=entries,
+                total_minutes=total,
+            ))
+
+    return ServiceCardResponse(date=target_date, workers=workers)
+
+
+@router.post("/service-cards", dependencies=[Depends(admin_required)])
+async def save_service_card(payload: ServiceCardSave, db: db_dependency = None):
+    db.query(AnalyticaService).filter(
+        AnalyticaService.user_id == payload.user_id,
+        AnalyticaService.date == payload.date,
+    ).delete()
+
+    for entry in payload.entries:
+        if entry.minutes > 0:
+            obj = AnalyticaService(
+                user_id=payload.user_id,
+                date=payload.date,
+                activity_type=entry.activity_type,
+                mould_number=entry.mould_number,
+                minutes=entry.minutes,
+            )
+            db.add(obj)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Could not save service card")
+
+    return {"message": "Service card saved", "user_id": payload.user_id, "date": str(payload.date)}
+
+
+@router.delete("/service-cards", dependencies=[Depends(admin_required)])
+async def reset_service_card(
+    user_id: int = Query(...),
+    target_date: date = Query(..., alias="date"),
+    db: db_dependency = None,
+):
+    deleted = db.query(AnalyticaService).filter(
+        AnalyticaService.user_id == user_id,
+        AnalyticaService.date == target_date,
+    ).delete()
+
+    db.commit()
+    return {"message": f"Deleted {deleted} entries", "user_id": user_id, "date": str(target_date)}

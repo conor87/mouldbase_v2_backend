@@ -28,3 +28,4 @@ class ServiceLog(Base):
     mes_activ_service_id = Column(Integer, nullable=True)
     mes_activ_changeover_id = Column(Integer, nullable=True)
     status_changeover = Column(String(50), nullable=True)
+    mould_number = Column(String(50), nullable=True)
