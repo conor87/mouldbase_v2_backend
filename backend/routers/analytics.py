@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func as sa_func
+from sqlalchemy import func as sa_func, or_
 from sqlalchemy.orm import Session
 
 from db.database import db_dependency
@@ -360,7 +360,7 @@ async def reset_machine_card(
 
 # ==================== Service cards ====================
 
-SKIP_SERVICE_STATUSES = {"Koniec działań", "Wylogowanie"}
+SKIP_SERVICE_STATUSES = {"Koniec działań", "Wylogowanie", "Koniec przezbrojenia"}
 
 
 def _parse_service_dt(s: str) -> Optional[datetime]:
@@ -389,7 +389,9 @@ def _compute_service_from_logs(db: Session, target_date: date) -> dict:
         db.query(ServiceLog)
         .filter(ServiceLog.created_at >= day_start_str, ServiceLog.created_at < day_end_str)
         .filter(ServiceLog.operator.isnot(None))
-        .filter(ServiceLog.status_service.isnot(None))
+        .filter(
+            or_(ServiceLog.status_service.isnot(None), ServiceLog.status_changeover.isnot(None))
+        )
         .order_by(ServiceLog.operator, ServiceLog.created_at)
         .all()
     )
@@ -403,7 +405,8 @@ def _compute_service_from_logs(db: Session, target_date: date) -> dict:
         activity_minutes = {}
         for i in range(len(o_logs) - 1):
             current = o_logs[i]
-            if current.status_service in SKIP_SERVICE_STATUSES:
+            activity = current.status_service or current.status_changeover
+            if not activity or activity in SKIP_SERVICE_STATUSES:
                 continue
             next_log = o_logs[i + 1]
             t1 = _parse_service_dt(current.created_at)
@@ -413,7 +416,7 @@ def _compute_service_from_logs(db: Session, target_date: date) -> dict:
             delta = (t2 - t1).total_seconds() / 60.0
             if delta > 720:  # 12h safety cap
                 delta = 0
-            key = (current.status_service, getattr(current, "mould_number", None))
+            key = (activity, getattr(current, "mould_number", None))
             activity_minutes[key] = activity_minutes.get(key, 0) + delta
         for (activity, mould), mins in activity_minutes.items():
             mins = round(mins)
