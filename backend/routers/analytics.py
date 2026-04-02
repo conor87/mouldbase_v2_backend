@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from db.database import db_dependency
 from models.analytics import AnalyticaMachines, AnalyticaService, AnalyticaWorkers
 from models.production import MachineStatus, Operation, OperationLog, ProductionOrder, ProductionTask, Workstation
+from models.changeovers import Changeover
+from models.mould import Mould
 from models.service import ServiceLog
 from models.user import Users
 from routers.auth import admin_required, user_required
@@ -396,6 +398,22 @@ def _compute_service_from_logs(db: Session, target_date: date) -> dict:
         .all()
     )
 
+    # Build mould_number lookup for changeover logs missing mould_number
+    changeover_ids = {
+        log.mes_activ_changeover_id
+        for log in logs
+        if log.mes_activ_changeover_id and not log.mould_number and log.status_changeover
+    }
+    changeover_mould_map = {}
+    if changeover_ids:
+        rows = (
+            db.query(Changeover.id, Mould.mould_number)
+            .join(Mould, Changeover.to_mould_id == Mould.id)
+            .filter(Changeover.id.in_(changeover_ids))
+            .all()
+        )
+        changeover_mould_map = {r.id: r.mould_number for r in rows}
+
     op_logs = {}
     for log in logs:
         op_logs.setdefault(log.operator, []).append(log)
@@ -416,7 +434,8 @@ def _compute_service_from_logs(db: Session, target_date: date) -> dict:
             delta = (t2 - t1).total_seconds() / 60.0
             if delta > 720:  # 12h safety cap
                 delta = 0
-            key = (activity, getattr(current, "mould_number", None))
+            mould = current.mould_number or changeover_mould_map.get(current.mes_activ_changeover_id)
+            key = (activity, mould)
             activity_minutes[key] = activity_minutes.get(key, 0) + delta
         for (activity, mould), mins in activity_minutes.items():
             mins = round(mins)
