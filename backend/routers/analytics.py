@@ -52,27 +52,26 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
     )
 
     result = {}
-    user_logs = {}
+    # Group by (user_id, workstation_id) so concurrent machine work is tracked independently
+    user_ws_logs = {}
     for log in logs:
-        user_logs.setdefault(log.user_id, []).append(log)
+        key = (log.user_id, log.workstation_id)
+        user_ws_logs.setdefault(key, []).append(log)
 
-    for user_id, u_logs in user_logs.items():
-        ws_minutes = {}
-        for i in range(len(u_logs) - 1):
-            current = u_logs[i]
-            # Only count time when machine is in a work status
+    for (user_id, ws_id), ws_logs in user_ws_logs.items():
+        total = 0
+        for i in range(len(ws_logs) - 1):
+            current = ws_logs[i]
             if current.status_id not in work_ids:
                 continue
-            next_log = u_logs[i + 1]
+            next_log = ws_logs[i + 1]
             delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
             if delta > 480:
                 delta = 0
-            ws_id = current.workstation_id
-            ws_minutes[ws_id] = ws_minutes.get(ws_id, 0) + delta
-        for ws_id, mins in ws_minutes.items():
-            mins = round(mins)
-            if mins > 0:
-                result.setdefault(user_id, {})[ws_id] = mins
+            total += delta
+        mins = round(total)
+        if mins > 0:
+            result.setdefault(user_id, {})[ws_id] = mins
 
     return result
 
