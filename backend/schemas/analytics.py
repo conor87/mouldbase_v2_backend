@@ -6,6 +6,7 @@ from datetime import date, datetime
 class WorkerEntry(BaseModel):
     workstation_id: int
     workstation_name: Optional[str] = None
+    order_number: Optional[str] = None
     minutes: int
 
 
@@ -33,6 +34,8 @@ class WorkerCardResponse(BaseModel):
 
 class MachineEntry(BaseModel):
     operation_id: int
+    user_id: Optional[int] = None
+    username: Optional[str] = None
     operation_label: Optional[str] = None
     order_number: Optional[str] = None
     minutes: int

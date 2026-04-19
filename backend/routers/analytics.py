@@ -51,14 +51,28 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
         .all()
     )
 
+    # Map operation_id -> order_number
+    op_ids = {log.operation_id for log in logs if log.operation_id}
+    op_to_order = {}
+    if op_ids:
+        rows = (
+            db.query(Operation.id, ProductionOrder.order_number)
+            .join(ProductionTask, Operation.task_id == ProductionTask.id)
+            .join(ProductionOrder, ProductionTask.order_id == ProductionOrder.id)
+            .filter(Operation.id.in_(op_ids))
+            .all()
+        )
+        op_to_order = {r.id: r.order_number for r in rows}
+
     result = {}
-    # Group by (user_id, workstation_id) so concurrent machine work is tracked independently
+    # Group by (user_id, workstation_id, order_number) so concurrent machine work is tracked independently
     user_ws_logs = {}
     for log in logs:
-        key = (log.user_id, log.workstation_id)
+        order_no = op_to_order.get(log.operation_id) if log.operation_id else None
+        key = (log.user_id, log.workstation_id, order_no)
         user_ws_logs.setdefault(key, []).append(log)
 
-    for (user_id, ws_id), ws_logs in user_ws_logs.items():
+    for (user_id, ws_id, order_no), ws_logs in user_ws_logs.items():
         total = 0
         for i in range(len(ws_logs) - 1):
             current = ws_logs[i]
@@ -71,7 +85,7 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
             total += delta
         mins = round(total)
         if mins > 0:
-            result.setdefault(user_id, {})[ws_id] = mins
+            result.setdefault(user_id, {})[(ws_id, order_no)] = mins
 
     return result
 
@@ -107,6 +121,7 @@ async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_
                 WorkerEntry(
                     workstation_id=row.workstation_id,
                     workstation_name=ws_map.get(row.workstation_id, f"WS #{row.workstation_id}"),
+                    order_number=row.order_number,
                     minutes=row.minutes,
                 )
                 for row in saved_by_user[user_id]
@@ -117,9 +132,10 @@ async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_
                 WorkerEntry(
                     workstation_id=ws_id,
                     workstation_name=ws_map.get(ws_id, f"WS #{ws_id}"),
+                    order_number=order_no,
                     minutes=mins,
                 )
-                for ws_id, mins in log_data[user_id].items()
+                for (ws_id, order_no), mins in log_data[user_id].items()
             ]
             source = "logs"
         else:
@@ -153,6 +169,7 @@ async def save_worker_card(payload: WorkerCardSave, db: db_dependency = None):
                 user_id=payload.user_id,
                 date=payload.date,
                 workstation_id=entry.workstation_id,
+                order_number=entry.order_number,
                 minutes=entry.minutes,
             )
             db.add(obj)
@@ -222,11 +239,13 @@ def _compute_machine_from_logs(db: Session, target_date: date) -> dict:
             if delta > 1440:  # 24h safety cap
                 delta = 0
             op_id = current.operation_id
-            op_minutes[op_id] = op_minutes.get(op_id, 0) + delta
-        for op_id, mins in op_minutes.items():
+            user_id = current.user_id
+            key = (op_id, user_id)
+            op_minutes[key] = op_minutes.get(key, 0) + delta
+        for (op_id, user_id), mins in op_minutes.items():
             mins = round(mins)
             if mins > 0:
-                result.setdefault(ws_id, {})[op_id] = mins
+                result.setdefault(ws_id, {})[(op_id, user_id)] = mins
 
     return result
 
@@ -245,6 +264,9 @@ def _build_operation_label(op, task_map, order_map):
 
 @router.get("/machine-cards", response_model=MachineCardResponse, dependencies=[Depends(admin_required)])
 async def get_machine_cards(target_date: date = Query(..., alias="date"), db: db_dependency = None):
+    users = db.query(Users.id, Users.username).all()
+    user_map = {u.id: u.username for u in users}
+
     workstations = db.query(Workstation).all()
     ws_map = {ws.id: ws.name for ws in workstations}
 
@@ -281,6 +303,8 @@ async def get_machine_cards(target_date: date = Query(..., alias="date"), db: db
                     order = order_map.get(task.order_id) if task else None
                 entries.append(MachineEntry(
                     operation_id=row.operation_id,
+                    user_id=row.user_id,
+                    username=user_map.get(row.user_id) if row.user_id else None,
                     operation_label=label,
                     order_number=order.order_number if order else None,
                     minutes=row.minutes,
@@ -288,7 +312,7 @@ async def get_machine_cards(target_date: date = Query(..., alias="date"), db: db
             source = "saved"
         elif ws_id in log_data:
             entries = []
-            for op_id, mins in log_data[ws_id].items():
+            for (op_id, u_id), mins in log_data[ws_id].items():
                 op = op_map.get(op_id)
                 label = _build_operation_label(op, task_map, order_map) if op else f"Op #{op_id}"
                 order = None
@@ -297,6 +321,8 @@ async def get_machine_cards(target_date: date = Query(..., alias="date"), db: db
                     order = order_map.get(task.order_id) if task else None
                 entries.append(MachineEntry(
                     operation_id=op_id,
+                    user_id=u_id,
+                    username=user_map.get(u_id) if u_id else None,
                     operation_label=label,
                     order_number=order.order_number if order else None,
                     minutes=mins,
@@ -331,6 +357,7 @@ async def save_machine_card(payload: MachineCardSave, db: db_dependency = None):
                 workstation_id=payload.workstation_id,
                 date=payload.date,
                 operation_id=entry.operation_id,
+                user_id=entry.user_id,
                 minutes=entry.minutes,
             )
             db.add(obj)

@@ -12,12 +12,13 @@ class AnalyticaWorkers(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False, index=True)
     workstation_id = Column(Integer, ForeignKey("workstations.id", ondelete="CASCADE"), nullable=False)
+    order_number = Column(String(64), nullable=True)
     minutes = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint("user_id", "date", "workstation_id", name="uq_user_date_workstation"),
+        UniqueConstraint("user_id", "date", "workstation_id", "order_number", name="uq_user_date_ws_order"),
     )
 
 
@@ -28,12 +29,13 @@ class AnalyticaMachines(Base):
     workstation_id = Column(Integer, ForeignKey("workstations.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False, index=True)
     operation_id = Column(Integer, ForeignKey("operations.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     minutes = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint("workstation_id", "date", "operation_id", name="uq_ws_date_operation"),
+        UniqueConstraint("workstation_id", "date", "operation_id", "user_id", name="uq_ws_date_op_user"),
     )
 
 
