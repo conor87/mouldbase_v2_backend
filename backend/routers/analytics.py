@@ -51,28 +51,28 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
         .all()
     )
 
-    # Map operation_id -> order_number
+    # Map operation_id -> order context
     op_ids = {log.operation_id for log in logs if log.operation_id}
     op_to_order = {}
     if op_ids:
         rows = (
-            db.query(Operation.id, ProductionOrder.order_number)
+            db.query(Operation.id, ProductionOrder.order_number, ProductionOrder.team)
             .join(ProductionTask, Operation.task_id == ProductionTask.id)
             .join(ProductionOrder, ProductionTask.order_id == ProductionOrder.id)
             .filter(Operation.id.in_(op_ids))
             .all()
         )
-        op_to_order = {r.id: r.order_number for r in rows}
+        op_to_order = {r.id: (r.order_number, r.team) for r in rows}
 
     result = {}
     # Group by (user_id, workstation_id, order_number) so concurrent machine work is tracked independently
     user_ws_logs = {}
     for log in logs:
-        order_no = op_to_order.get(log.operation_id) if log.operation_id else None
-        key = (log.user_id, log.workstation_id, order_no)
+        order_no, order_team = op_to_order.get(log.operation_id, (None, None)) if log.operation_id else (None, None)
+        key = (log.user_id, log.workstation_id, order_no, order_team)
         user_ws_logs.setdefault(key, []).append(log)
 
-    for (user_id, ws_id, order_no), ws_logs in user_ws_logs.items():
+    for (user_id, ws_id, order_no, order_team), ws_logs in user_ws_logs.items():
         total = 0
         for i in range(len(ws_logs) - 1):
             current = ws_logs[i]
@@ -85,7 +85,7 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
             total += delta
         mins = round(total)
         if mins > 0:
-            result.setdefault(user_id, {})[(ws_id, order_no)] = mins
+            result.setdefault(user_id, {})[(ws_id, order_no, order_team)] = mins
 
     return result
 
@@ -99,6 +99,9 @@ async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_
     # Get workstation names
     workstations = db.query(Workstation.id, Workstation.name).all()
     ws_map = {ws.id: ws.name for ws in workstations}
+
+    orders = db.query(ProductionOrder.order_number, ProductionOrder.team).all()
+    order_team_map = {o.order_number: o.team for o in orders}
 
     # Get saved analytics data for this date
     saved = db.query(AnalyticaWorkers).filter(AnalyticaWorkers.date == target_date).all()
@@ -122,6 +125,7 @@ async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_
                     workstation_id=row.workstation_id,
                     workstation_name=ws_map.get(row.workstation_id, f"WS #{row.workstation_id}"),
                     order_number=row.order_number,
+                    order_team=order_team_map.get(row.order_number),
                     minutes=row.minutes,
                 )
                 for row in saved_by_user[user_id]
@@ -133,9 +137,10 @@ async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_
                     workstation_id=ws_id,
                     workstation_name=ws_map.get(ws_id, f"WS #{ws_id}"),
                     order_number=order_no,
+                    order_team=order_team,
                     minutes=mins,
                 )
-                for (ws_id, order_no), mins in log_data[user_id].items()
+                for (ws_id, order_no, order_team), mins in log_data[user_id].items()
             ]
             source = "logs"
         else:

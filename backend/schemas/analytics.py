@@ -7,6 +7,7 @@ class WorkerEntry(BaseModel):
     workstation_id: int
     workstation_name: Optional[str] = None
     order_number: Optional[str] = None
+    order_team: Optional[str] = None
     minutes: int
 
 
