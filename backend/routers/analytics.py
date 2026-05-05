@@ -80,7 +80,7 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
                 continue
             next_log = ws_logs[i + 1]
             delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
-            if delta > 480:
+            if delta > 720:  # 12h safety cap; shifts can exceed 8h with overtime
                 delta = 0
             total += delta
         mins = round(total)
