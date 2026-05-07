@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from datetime import date, datetime
 
@@ -29,6 +29,26 @@ class WorkerCardResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     workers: List[WorkerCard]
+
+
+class WorkerCalendarDay(BaseModel):
+    date: date
+    minutes: int
+    shifts: List[str] = Field(default_factory=list)
+    shift_percentages: dict[str, int] = Field(default_factory=dict)
+
+
+class WorkerCalendarRow(BaseModel):
+    user_id: int
+    username: str
+    days: List[WorkerCalendarDay]
+    total_minutes: int
+
+
+class WorkerCalendarResponse(BaseModel):
+    month: str
+    days: List[date]
+    workers: List[WorkerCalendarRow]
 
 
 # --- Machine analytics ---

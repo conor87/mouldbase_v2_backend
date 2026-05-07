@@ -16,6 +16,7 @@ from routers.auth import admin_required, user_required
 from schemas.analytics import (
     MachineCard, MachineCardResponse, MachineCardSave, MachineEntry,
     ServiceCard, ServiceCardResponse, ServiceCardSave, ServiceEntry,
+    WorkerCalendarDay, WorkerCalendarResponse, WorkerCalendarRow,
     WorkerCard, WorkerCardResponse, WorkerCardSave, WorkerEntry,
 )
 
@@ -90,6 +91,94 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
     return result
 
 
+def _compute_worker_display_total(entries: dict) -> int:
+    """
+    Sum sequential orders on the same workstation, then take the longest
+    workstation total as the worker's effective time for the day.
+    """
+    workstation_totals = {}
+    for (ws_id, _order_no, _order_team), minutes in entries.items():
+        workstation_totals[ws_id] = workstation_totals.get(ws_id, 0) + minutes
+    return max(workstation_totals.values(), default=0)
+
+
+def _split_interval_by_shift(start: datetime, end: datetime) -> dict:
+    current = start
+    result = {}
+    while current < end:
+        day = current.date()
+        if 6 <= current.hour < 14:
+            label = "6-14"
+            boundary = datetime.combine(day, datetime.min.time()) + timedelta(hours=14)
+        elif 14 <= current.hour < 22:
+            label = "14-22"
+            boundary = datetime.combine(day, datetime.min.time()) + timedelta(hours=22)
+        else:
+            label = "22-6"
+            boundary_day = day if current.hour < 6 else day + timedelta(days=1)
+            boundary = datetime.combine(boundary_day, datetime.min.time()) + timedelta(hours=6)
+
+        segment_end = min(end, boundary)
+        minutes = (segment_end - current).total_seconds() / 60.0
+        if minutes > 0:
+            result[label] = result.get(label, 0) + minutes
+        current = segment_end
+    return result
+
+
+def _compute_worker_shift_percentages(db: Session, target_date: date) -> dict:
+    day_start = datetime.combine(target_date, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
+    work_ids = _get_work_status_ids(db)
+
+    logs = (
+        db.query(OperationLog)
+        .filter(OperationLog.created_at >= day_start, OperationLog.created_at < day_end)
+        .filter(OperationLog.user_id.isnot(None))
+        .filter(OperationLog.workstation_id.isnot(None))
+        .order_by(OperationLog.user_id, OperationLog.workstation_id, OperationLog.operation_id, OperationLog.created_at)
+        .all()
+    )
+
+    grouped_logs = {}
+    for log in logs:
+        key = (log.user_id, log.workstation_id, log.operation_id)
+        grouped_logs.setdefault(key, []).append(log)
+
+    shift_minutes_by_ws = {}
+    for (user_id, ws_id, _op_id), group in grouped_logs.items():
+        for i in range(len(group) - 1):
+            current = group[i]
+            if current.status_id not in work_ids:
+                continue
+            next_log = group[i + 1]
+            delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
+            if delta <= 0 or delta > 720:
+                continue
+            for label, minutes in _split_interval_by_shift(current.created_at, next_log.created_at).items():
+                user_ws = shift_minutes_by_ws.setdefault(user_id, {}).setdefault(ws_id, {})
+                user_ws[label] = user_ws.get(label, 0) + minutes
+
+    shift_order = {"6-14": 0, "14-22": 1, "22-6": 2}
+    result = {}
+    for user_id, workstation_data in shift_minutes_by_ws.items():
+        if not workstation_data:
+            continue
+        dominant_shifts = max(workstation_data.values(), key=lambda shifts: sum(shifts.values()))
+        total = sum(dominant_shifts.values())
+        if total <= 0:
+            continue
+        labels = sorted(dominant_shifts, key=lambda label: shift_order.get(label, 99))
+        percentages = {label: round((dominant_shifts[label] / total) * 100) for label in labels}
+        diff = 100 - sum(percentages.values())
+        if diff and labels:
+            labels_by_minutes = sorted(labels, key=lambda label: dominant_shifts[label], reverse=True)
+            percentages[labels_by_minutes[0]] += diff
+        result[user_id] = {"shifts": labels, "percentages": percentages}
+
+    return result
+
+
 @router.get("/worker-cards", response_model=WorkerCardResponse, dependencies=[Depends(admin_required)])
 async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_dependency = None):
     # Get all users
@@ -157,6 +246,73 @@ async def get_worker_cards(target_date: date = Query(..., alias="date"), db: db_
             ))
 
     return WorkerCardResponse(date=target_date, workers=workers)
+
+
+@router.get("/worker-calendar", response_model=WorkerCalendarResponse, dependencies=[Depends(admin_required)])
+async def get_worker_calendar(month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), db: db_dependency = None):
+    try:
+        month_start = datetime.strptime(f"{month}-01", "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid month")
+
+    if month_start.month == 12:
+        next_month = date(month_start.year + 1, 1, 1)
+    else:
+        next_month = date(month_start.year, month_start.month + 1, 1)
+
+    month_days = [
+        month_start + timedelta(days=offset)
+        for offset in range((next_month - month_start).days)
+    ]
+
+    users = db.query(Users.id, Users.username).all()
+    user_map = {u.id: u.username for u in users}
+    worker_days = {}
+
+    saved_rows = (
+        db.query(AnalyticaWorkers)
+        .filter(AnalyticaWorkers.date >= month_start, AnalyticaWorkers.date < next_month)
+        .all()
+    )
+    saved_by_day_user = {}
+    for row in saved_rows:
+        saved_by_day_user.setdefault((row.date, row.user_id), {})[
+            (row.workstation_id, row.order_number, None)
+        ] = row.minutes
+
+    for day in month_days:
+        log_data = _compute_from_logs(db, day)
+        shift_data = _compute_worker_shift_percentages(db, day)
+        user_ids = {uid for (row_day, uid) in saved_by_day_user if row_day == day} | set(log_data.keys())
+        for user_id in user_ids:
+            entries = saved_by_day_user.get((day, user_id)) or log_data.get(user_id, {})
+            minutes = _compute_worker_display_total(entries)
+            if minutes > 0:
+                worker_days.setdefault(user_id, {})[day] = {
+                    "minutes": minutes,
+                    "shifts": shift_data.get(user_id, {}).get("shifts", []),
+                    "shift_percentages": shift_data.get(user_id, {}).get("percentages", {}),
+                }
+
+    workers = []
+    for user_id in sorted(worker_days, key=lambda uid: user_map.get(uid, "")):
+        days = [
+            WorkerCalendarDay(
+                date=day,
+                minutes=data["minutes"],
+                shifts=data["shifts"],
+                shift_percentages=data["shift_percentages"],
+            )
+            for day, data in sorted(worker_days[user_id].items())
+        ]
+        workers.append(WorkerCalendarRow(
+            user_id=user_id,
+            username=user_map.get(user_id, f"User #{user_id}"),
+            days=days,
+            total_minutes=sum(day.minutes for day in days),
+        ))
+
+    return WorkerCalendarResponse(month=month, days=month_days, workers=workers)
 
 
 @router.post("/worker-cards", dependencies=[Depends(admin_required)])
