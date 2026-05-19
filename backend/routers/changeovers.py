@@ -14,7 +14,7 @@ from models.mould import Mould
 from schemas.changeovers import ChangeoverRead
 
 # auth
-from routers.auth import user_dependency, admin_required
+from routers.auth import user_dependency, admin_required, user_required
 
 router = APIRouter(prefix="/changeovers", tags=["changeovers"])
 
@@ -264,6 +264,40 @@ async def update_changeover(
     db.commit()
 
     db.refresh(co)
+    return co
+
+
+@router.put("/{changeover_id}/complete", response_model=ChangeoverRead, dependencies=[Depends(user_required)])
+async def complete_changeover(
+    changeover_id: int,
+    db: Session = Depends(get_db),
+    user: user_dependency = None,
+):
+    co = db.query(Changeover).filter(Changeover.id == changeover_id).first()
+    if not co:
+        raise HTTPException(status_code=404, detail="Changeover not found")
+
+    username = get_username_from_user(user)
+    old_snapshot = dump_changeover(co)
+
+    co.czy_wykonano = True
+    co.updated_by = username
+
+    db.add(co)
+    db.commit()
+    db.refresh(co)
+
+    new_snapshot = dump_changeover(co)
+    add_log(
+        db,
+        changeover_id=co.id,
+        action="TOGGLE_DONE" if old_snapshot.get("czy_wykonano") != new_snapshot.get("czy_wykonano") else "UPDATE",
+        old_data=old_snapshot,
+        new_data=new_snapshot,
+        updated_by=username,
+    )
+    db.commit()
+
     return co
 
 

@@ -172,6 +172,10 @@ class OperationUpdate(BaseModel):
     workstation_id: Optional[int] = None
 
 
+class OperationTransferRequest(BaseModel):
+    workstation_id: int
+
+
 class OperationRead(OperationBase):
     model_config = ConfigDict(from_attributes=True)
     id: int

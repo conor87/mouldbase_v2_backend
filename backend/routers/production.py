@@ -37,6 +37,7 @@ from schemas.production import (
     WorkstationUpdate,
     WorkstationRead,
     OperationCreate,
+    OperationTransferRequest,
     OperationUpdate,
     OperationRead,
     OperationReorderRequest,
@@ -395,6 +396,16 @@ async def update_operation(operation_id: int, payload: OperationUpdate, db: db_d
     for key, value in data.items():
         setattr(obj, key, value)
     commit_or_409(db, "Operation already exists")
+    db.refresh(obj)
+    return obj
+
+
+@router.put("/operations/{operation_id}/transfer", response_model=OperationRead, dependencies=[Depends(user_required)])
+async def transfer_operation(operation_id: int, payload: OperationTransferRequest, db: db_dependency):
+    obj = require_row(db, Operation, operation_id, "Operation")
+    require_row(db, Workstation, payload.workstation_id, "Workstation")
+    obj.workstation_id = payload.workstation_id
+    commit_or_409(db, "Operation could not be transferred")
     db.refresh(obj)
     return obj
 
