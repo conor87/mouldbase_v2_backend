@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from typing import Annotated, List
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 from db.database import SessionLocal, engine
 from models.user import Users
@@ -30,6 +31,8 @@ from models.analytics import AnalyticaWorkers, AnalyticaMachines, AnalyticaServi
 from routers.analytics import router as analytics_router
 from models.mes_session import MesSessionLog  # before create_all
 from routers.mes_session import router as mes_session_router
+from models.service_guide import ServiceGuide, ServiceGuideStep  # before create_all
+from routers.service_guides import router as service_guides_router
 
 app = FastAPI()
 
@@ -63,6 +66,9 @@ app.add_middleware(
     )
        
 Base.metadata.create_all(bind=engine)
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE service_guides ADD COLUMN IF NOT EXISTS mould_id INTEGER"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_service_guides_mould_id ON service_guides (mould_id)"))
 
 app.include_router(auth_router)
 app.include_router(mould_router)
@@ -77,6 +83,7 @@ app.include_router(service_router)
 app.include_router(current_sv_router)
 app.include_router(analytics_router)
 app.include_router(mes_session_router)
+app.include_router(service_guides_router)
 
 
 
