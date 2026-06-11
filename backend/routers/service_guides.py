@@ -196,12 +196,39 @@ async def create_service_guide_step(guide_id: int, request: Request, db: db_depe
 async def update_service_guide_step(
     guide_id: int,
     step_id: int,
-    payload: ServiceGuideStepUpdate,
+    request: Request,
     db: db_dependency,
 ):
     step = get_step_or_404(db, guide_id, step_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(step, key, value)
+    content_type = request.headers.get("content-type", "")
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        if "lp" in form:
+            step.lp = form_int(form, "lp", step.lp)
+        if "fault" in form:
+            step.fault = form_text(form, "fault", step.fault)
+        if "confirmed_by" in form:
+            step.confirmed_by = form_text(form, "confirmed_by", step.confirmed_by)
+        if "repair" in form:
+            step.repair = form_text(form, "repair", step.repair)
+        if "performed_by" in form:
+            step.performed_by = form_text(form, "performed_by", step.performed_by)
+        if "is_done" in form:
+            step.is_done = parse_bool(form_text(form, "is_done", None), step.is_done)
+
+        photo_1 = form.get("extra_photo_1")
+        if hasattr(photo_1, "filename") and photo_1.filename:
+            _, step.extra_photo_1 = await save_upload_file(photo_1, media_dir="media/service_guides")
+
+        photo_2 = form.get("extra_photo_2")
+        if hasattr(photo_2, "filename") and photo_2.filename:
+            _, step.extra_photo_2 = await save_upload_file(photo_2, media_dir="media/service_guides")
+    else:
+        payload = ServiceGuideStepUpdate.model_validate(await request.json())
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(step, key, value)
+
     step.updated_at = datetime.utcnow()
     db.add(step)
     db.commit()
