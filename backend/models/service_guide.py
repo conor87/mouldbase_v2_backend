@@ -38,6 +38,8 @@ class ServiceGuideStep(Base):
     confirmed_by = Column(Text, nullable=True)
     repair = Column(Text, nullable=True)
     performed_by = Column(Text, nullable=True)
+    extra_photo_1 = Column(Text, nullable=True)
+    extra_photo_2 = Column(Text, nullable=True)
     is_done = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

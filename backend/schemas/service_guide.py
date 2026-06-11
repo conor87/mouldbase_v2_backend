@@ -10,6 +10,8 @@ class ServiceGuideStepBase(BaseModel):
     confirmed_by: Optional[str] = None
     repair: Optional[str] = None
     performed_by: Optional[str] = None
+    extra_photo_1: Optional[str] = None
+    extra_photo_2: Optional[str] = None
     is_done: bool = False
 
 
@@ -23,6 +25,8 @@ class ServiceGuideStepUpdate(BaseModel):
     confirmed_by: Optional[str] = None
     repair: Optional[str] = None
     performed_by: Optional[str] = None
+    extra_photo_1: Optional[str] = None
+    extra_photo_2: Optional[str] = None
     is_done: Optional[bool] = None
 
 

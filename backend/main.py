@@ -39,6 +39,7 @@ app = FastAPI()
 Path("../media").mkdir(parents=True, exist_ok=True)
 Path("../media/book").mkdir(parents=True, exist_ok=True)
 Path("../media/tpm").mkdir(parents=True, exist_ok=True)
+Path("../media/service_guides").mkdir(parents=True, exist_ok=True)
 
 app.mount("/media", StaticFiles(directory="media"), name="media")
 
@@ -69,6 +70,8 @@ Base.metadata.create_all(bind=engine)
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE service_guides ADD COLUMN IF NOT EXISTS mould_id INTEGER"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_service_guides_mould_id ON service_guides (mould_id)"))
+    conn.execute(text("ALTER TABLE service_guide_steps ADD COLUMN IF NOT EXISTS extra_photo_1 TEXT"))
+    conn.execute(text("ALTER TABLE service_guide_steps ADD COLUMN IF NOT EXISTS extra_photo_2 TEXT"))
 
 app.include_router(auth_router)
 app.include_router(mould_router)

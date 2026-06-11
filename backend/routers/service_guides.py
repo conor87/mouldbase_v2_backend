@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Request, Query, status
 
+from app.images import save_upload_file
 from db.database import db_dependency
 from models.service_guide import ServiceGuide, ServiceGuideStep
 from schemas.service_guide import (
@@ -33,6 +34,33 @@ def get_step_or_404(db, guide_id: int, step_id: int) -> ServiceGuideStep:
     if not step:
         raise HTTPException(status_code=404, detail="Service guide step not found")
     return step
+
+
+def parse_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "tak", "on"}
+
+
+def form_text(form, key: str, default=None):
+    value = form.get(key)
+    if hasattr(value, "filename"):
+        return default
+    if value is None:
+        return default
+    return str(value)
+
+
+def form_int(form, key: str, default: int = 1) -> int:
+    value = form_text(form, key, None)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 @router.get("/", response_model=List[ServiceGuideRead])
@@ -131,9 +159,33 @@ async def delete_service_guide(guide_id: int, db: db_dependency):
 
 
 @router.post("/{guide_id}/steps", response_model=ServiceGuideStepRead, status_code=status.HTTP_201_CREATED)
-async def create_service_guide_step(guide_id: int, payload: ServiceGuideStepCreate, db: db_dependency):
+async def create_service_guide_step(guide_id: int, request: Request, db: db_dependency):
     get_guide_or_404(db, guide_id)
-    step = ServiceGuideStep(guide_id=guide_id, **payload.model_dump())
+    content_type = request.headers.get("content-type", "")
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        data = {
+            "lp": form_int(form, "lp", 1),
+            "fault": form_text(form, "fault", None),
+            "confirmed_by": form_text(form, "confirmed_by", None),
+            "repair": form_text(form, "repair", None),
+            "performed_by": form_text(form, "performed_by", None),
+            "is_done": parse_bool(form_text(form, "is_done", None), False),
+        }
+
+        photo_1 = form.get("extra_photo_1")
+        if hasattr(photo_1, "filename") and photo_1.filename:
+            _, data["extra_photo_1"] = await save_upload_file(photo_1, media_dir="media/service_guides")
+
+        photo_2 = form.get("extra_photo_2")
+        if hasattr(photo_2, "filename") and photo_2.filename:
+            _, data["extra_photo_2"] = await save_upload_file(photo_2, media_dir="media/service_guides")
+    else:
+        payload = ServiceGuideStepCreate.model_validate(await request.json())
+        data = payload.model_dump()
+
+    step = ServiceGuideStep(guide_id=guide_id, **data)
     db.add(step)
     db.commit()
     db.refresh(step)
