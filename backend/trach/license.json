@@ -1,0 +1,14 @@
+{
+    "license": {
+        "customer": "Lamela sp. z o.o.",
+        "app": "MouldBase",
+        "valid_until": "2027-06-15",
+        "max_users": 30,
+        "modules": [
+            "moulds",
+            "mes",
+            "reports"
+        ]
+    },
+    "signature": "cUhX+/JodFPpIzwW4v3xEwHGERUjSphWwuyztY+pEqkiU0AKMupeE6M3aGPeaVKRqhEt35NQDhbbYIGoOGVsJ0F4ITkz3CHID5SYg530C46sd+l1xbe4IFEkMr1pLOvVzO2P5V/n8agXpqoF2tJ3duaNTz7JnKdINlqVeQG3DMgF4nMwk19bnUyuGQqmnqIIJAWDv629Afw7vJYTPJoGbziB+NBYLelwirN8SmShu2xLDxSFfIOkGHr8U5iShPgeAj1mBGyX80DlfiwQIPJy6gmIRs6MGbaJ30TjZVhBv5d6+lW78H+fOFgg5ULDjKtJMdtyBgJxhf7U0z50CIy+GQ=="
+}

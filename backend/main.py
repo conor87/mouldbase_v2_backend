@@ -38,8 +38,10 @@ from models.service_guide import ServiceGuide, ServiceGuideStep  # before create
 from routers.service_guides import router as service_guides_router
 from models.settings import SystemSetting  # before create_all
 from routers.settings import router as settings_router
+from license import license_middleware, router as license_router
 
 app = FastAPI()
+app.middleware("http")(license_middleware)
 
 Path("../media").mkdir(parents=True, exist_ok=True)
 Path("../media/book").mkdir(parents=True, exist_ok=True)
@@ -79,6 +81,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE service_guide_steps ADD COLUMN IF NOT EXISTS extra_photo_2 TEXT"))
 
 app.include_router(auth_router)
+app.include_router(license_router)
 app.include_router(mould_router)
 app.include_router(moulds_tpm_router)
 app.include_router(moulds_book_router)
