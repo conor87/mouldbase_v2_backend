@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException, Depends
 from typing import Annotated, List
+import asyncio
+from datetime import datetime, timedelta
+from models.service import ServiceWorkstation
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
@@ -33,6 +36,8 @@ from models.mes_session import MesSessionLog  # before create_all
 from routers.mes_session import router as mes_session_router
 from models.service_guide import ServiceGuide, ServiceGuideStep  # before create_all
 from routers.service_guides import router as service_guides_router
+from models.settings import SystemSetting  # before create_all
+from routers.settings import router as settings_router
 
 app = FastAPI()
 
@@ -87,6 +92,56 @@ app.include_router(current_sv_router)
 app.include_router(analytics_router)
 app.include_router(mes_session_router)
 app.include_router(service_guides_router)
+app.include_router(settings_router)
+
+async def auto_release_workstations_daily():
+    while True:
+        now = datetime.now()
+        target = now.replace(hour=23, minute=45, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        seconds_to_wait = (target - now).total_seconds()
+        print(f"[Scheduler] Czekam {seconds_to_wait} sekund na zwolnienie stanowisk o 23:45")
+        await asyncio.sleep(seconds_to_wait)
+        
+        print("[Scheduler] Rozpoczynam automatyczne zwalnianie stanowisk...")
+        db = SessionLocal()
+        try:
+            # Sprawdzenie czy autowylogowanie jest włączone w bazie danych
+            setting = db.query(SystemSetting).filter(SystemSetting.key == "auto_logout_enabled").first()
+            enabled = setting.value == "true" if setting else True  # domyślnie True, jeśli wpis jeszcze nie istnieje
+
+            if not enabled:
+                print("[Scheduler] Automatyczne wylogowywanie jest obecnie WYŁĄCZONE. Pomijam zwolnienie stanowisk.")
+            else:
+                # Zwolnienie stanowisk produkcyjnych
+                db.query(Workstation).update({
+                    Workstation.user_id: None,
+                    Workstation.status_id: None,
+                    Workstation.current_task_id: None,
+                    Workstation.current_operation_id: None
+                })
+                # Zwolnienie stanowisk serwisowych
+                db.query(ServiceWorkstation).update({
+                    ServiceWorkstation.user_id: None,
+                    ServiceWorkstation.status_changeovers: None,
+                    ServiceWorkstation.st: None,
+                    ServiceWorkstation.aktualne_przezbrojenie_id: None,
+                    ServiceWorkstation.aktualne_zlecenie_serwisowe_id: None,
+                    ServiceWorkstation.aktualny_typ_zlecenia: None
+                })
+                db.commit()
+                print("[Scheduler] Wszystkie stanowiska zostały pomyślnie zwolnione.")
+        except Exception as e:
+            db.rollback()
+            print(f"[Scheduler] Błąd podczas zwalniania stanowisk: {e}")
+        finally:
+            db.close()
+
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(auto_release_workstations_daily())
 
 
 
