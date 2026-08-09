@@ -15,6 +15,7 @@ from routers.auth import admin_required, user_dependency
 
 # ✅ TPM
 from models.moulds_tpm import MouldsTpm, Statusy
+from models.service_guide import ServiceGuide
 
 router = APIRouter(prefix="/moulds", tags=["moulds"])
 
@@ -25,6 +26,15 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def has_open_mould_service_guide(db: Session, mould_id: int) -> bool:
+    return (
+        db.query(ServiceGuide.id)
+        .filter(and_(ServiceGuide.mould_id == mould_id, ServiceGuide.status == "open"))
+        .first()
+        is not None
+    )
 
 
 # =========================
@@ -133,6 +143,7 @@ async def create_mould(
 
     out = MouldReadWithTpm.model_validate(m).model_dump()
     out["has_open_tpm"] = False
+    out["has_open_guide"] = False
     return out
 
 
@@ -155,7 +166,14 @@ async def read_molds(
         )
     ).label("has_open_tpm")
 
-    query = db.query(Mould, has_open_tpm_expr)
+    has_open_guide_expr = exists().where(
+        and_(
+            ServiceGuide.mould_id == Mould.id,
+            ServiceGuide.status == "open",
+        )
+    ).label("has_open_guide")
+
+    query = db.query(Mould, has_open_tpm_expr, has_open_guide_expr)
 
     if search:
         like = f"%{search}%"
@@ -164,9 +182,10 @@ async def read_molds(
     rows = query.offset(skip).limit(limit).all()
 
     result = []
-    for mould, has_open_tpm in rows:
+    for mould, has_open_tpm, has_open_guide in rows:
         data = MouldReadWithTpm.model_validate(mould).model_dump()
         data["has_open_tpm"] = bool(has_open_tpm)
+        data["has_open_guide"] = bool(has_open_guide)
         result.append(data)
 
     return result
@@ -193,6 +212,7 @@ async def get_mould(mould_number: str, db: db_dependency):
 
     out = MouldReadWithTpm.model_validate(m).model_dump()
     out["has_open_tpm"] = bool(has_open)
+    out["has_open_guide"] = has_open_mould_service_guide(db, m.id)
     return out
 
 
@@ -320,6 +340,7 @@ async def update_mould(
 
     out = MouldReadWithTpm.model_validate(m).model_dump()
     out["has_open_tpm"] = bool(has_open)
+    out["has_open_guide"] = has_open_mould_service_guide(db, m.id)
     return out
 
 @router.delete(

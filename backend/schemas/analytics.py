@@ -8,6 +8,7 @@ class WorkerEntry(BaseModel):
     workstation_name: Optional[str] = None
     order_number: Optional[str] = None
     order_team: Optional[str] = None
+    order_product_name: Optional[str] = None
     minutes: int
 
 
@@ -59,6 +60,11 @@ class MachineEntry(BaseModel):
     username: Optional[str] = None
     operation_label: Optional[str] = None
     order_number: Optional[str] = None
+    order_team: Optional[str] = None
+    order_product_name: Optional[str] = None
+    detail_name: Optional[str] = None
+    operation_no: Optional[int] = None
+    operation_description: Optional[str] = None
     minutes: int
 
 
@@ -88,6 +94,7 @@ class ServiceEntry(BaseModel):
     activity_type: str
     activity_label: Optional[str] = None
     mould_number: Optional[str] = None
+    mould_product: Optional[str] = None
     minutes: int
 
 

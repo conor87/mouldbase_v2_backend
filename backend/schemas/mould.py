@@ -56,3 +56,4 @@ class MouldRead(MouldBase):
 
 class MouldReadWithTpm(MouldRead):
     has_open_tpm: bool = False
+    has_open_guide: bool = False

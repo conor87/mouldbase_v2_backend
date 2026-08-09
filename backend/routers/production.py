@@ -17,7 +17,7 @@ from models.production import (
     OperationLog,
 )
 from models.user import Users
-from routers.auth import user_required, admin_required, superadmin_required
+from routers.auth import user_required, admin_required, superadmin_required, user_dependency
 from schemas.production import (
     MachineGroupCreate,
     MachineGroupRead,
@@ -386,9 +386,11 @@ async def create_operation(payload: OperationCreate, db: db_dependency):
 
 
 @router.put("/operations/{operation_id}", response_model=OperationRead, dependencies=[Depends(admin_required)])
-async def update_operation(operation_id: int, payload: OperationUpdate, db: db_dependency):
+async def update_operation(operation_id: int, payload: OperationUpdate, user: user_dependency, db: db_dependency):
     obj = require_row(db, Operation, operation_id, "Operation")
     data = payload.model_dump(exclude_unset=True)
+    if "is_done" in data and user.get("role") not in {"admindn", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Niewystarczające uprawnienia")
     if "task_id" in data:
         require_row(db, ProductionTask, data["task_id"], "Task")
     if "workstation_id" in data and data["workstation_id"] is not None:
