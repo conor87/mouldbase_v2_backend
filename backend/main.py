@@ -39,6 +39,7 @@ from routers.service_guides import router as service_guides_router
 from models.settings import SystemSetting  # before create_all
 from routers.settings import router as settings_router
 from license import license_middleware, router as license_router
+#test
 
 app = FastAPI()
 app.middleware("http")(license_middleware)
