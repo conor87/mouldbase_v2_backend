@@ -24,12 +24,19 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # status_no values that represent active work — only these count towards work time
 WORK_STATUS_NOS = {1, 2, 3}  # Praca z operatorem, Praca bez operatora, Ustawianie
+STOP_LOG_NOTES = {"Wylogowanie"}
 
 
 def _get_work_status_ids(db: Session) -> set:
     """Get status IDs that represent active work (praca z operatorem, bez operatora, ustawianie)."""
     rows = db.query(MachineStatus.id).filter(MachineStatus.status_no.in_(WORK_STATUS_NOS)).all()
     return {r.id for r in rows}
+
+
+def _is_work_interval_start(log: OperationLog, work_ids: set) -> bool:
+    if (log.note or "").strip() in STOP_LOG_NOTES:
+        return False
+    return log.status_id in work_ids
 
 
 def _compute_from_logs(db: Session, target_date: date) -> dict:
@@ -77,7 +84,7 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
         total = 0
         for i in range(len(ws_logs) - 1):
             current = ws_logs[i]
-            if current.status_id not in work_ids:
+            if not _is_work_interval_start(current, work_ids):
                 continue
             next_log = ws_logs[i + 1]
             delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
@@ -149,7 +156,7 @@ def _compute_worker_shift_percentages(db: Session, target_date: date) -> dict:
     for (user_id, ws_id, _op_id), group in grouped_logs.items():
         for i in range(len(group) - 1):
             current = group[i]
-            if current.status_id not in work_ids:
+            if not _is_work_interval_start(current, work_ids):
                 continue
             next_log = group[i + 1]
             delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
@@ -395,7 +402,7 @@ def _compute_machine_from_logs(db: Session, target_date: date) -> dict:
         for i in range(len(w_logs) - 1):
             current = w_logs[i]
             # Only count time when machine is in a work status
-            if current.status_id not in work_ids:
+            if not _is_work_interval_start(current, work_ids):
                 continue
             next_log = w_logs[i + 1]
             delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
