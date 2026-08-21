@@ -2,7 +2,7 @@
     "license": {
         "customer": "Lamela sp. z o.o.",
         "app": "MouldBase",
-        "valid_until": "2026-09-15",
+        "valid_until": "2026-12-15",
         "max_users": 30,
         "modules": [
             "moulds",
@@ -10,5 +10,5 @@
             "reports"
         ]
     },
-    "signature": "KzY9l9iZXB9p99q+20tNbfuwnSbBZFLTUqWQqu698JDCPKt5JDDMZpEBUC2ZGMcSADMa91na2F0fII5hUUg1WjYC3SW/BPfvxRytNwEu6WDSutt1Iqdg4dknQZO8YkOoQY3SdW0qzf8RrFBat2BuQcY8KpLKqTiv+wph0Vm8DSRwy6FMFswS0xVfLwUxbibwab5QWPKVvlaCVuC6GX0szZRst4bY0gOsld6ePd8MThtiBrjdesH+CPdbuW4sivryuyiX9OwEzuTnfcp1ZiaOjsxfdZmiEo6aIti+OtaCc0JJuqJep0O7YZO9agDOLnwmR7IyoeQiQjhav/dhTc+4uQ=="
+    "signature": "BEDmf3TKTlS3aTm5IwZfUoD0eNQjHNY3Z3hxR4z0YFzB5wlt50BqSLyrkPx03B1x5qP0oVtP6yp/GxbkIBqteJGWCM9CgSC/OBjzAkm4TGlqbskULpuQP3C29uqIgOiDvfKdwS6VnmVCC3L/eNaQnwMWYi9V9/UGnnsnpI6xnltM2yPHKNC6EOQ+bZcNrJC7og5/wrsibHgkYOdd5vPvMvTkuw7uDO310XArQdYS9v+zVUt/tYJ5Yuv03/AXU7rnEIuVBRWSxytOUXAtH+3QSmR362WjSycmbw/tdJ0TrERvcYUkw3oADPWj3IKy+u7u6acp5jg8jcSgyu4tZ1LFjA=="
 }
