@@ -39,6 +39,48 @@ def _is_work_interval_start(log: OperationLog, work_ids: set) -> bool:
     return log.status_id in work_ids
 
 
+def _iter_work_intervals(
+    logs: list,
+    work_ids: set,
+    target_date: date,
+    max_minutes: int,
+    open_period_minutes: int = 480,
+):
+    """
+    Yield active work intervals, including the last open interval for the day.
+    Open intervals are bounded by the report day and the safety cap, not fixed shifts.
+    """
+    day_start = datetime.combine(target_date, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
+
+    active_period_start = None
+
+    for i, current in enumerate(logs):
+        is_work = _is_work_interval_start(current, work_ids)
+        if not is_work:
+            active_period_start = None
+            continue
+
+        if active_period_start is None:
+            active_period_start = current.created_at
+
+        next_log = logs[i + 1] if i + 1 < len(logs) else None
+        interval_end = next_log.created_at if next_log else day_end
+        max_end = current.created_at + timedelta(minutes=max_minutes)
+        if next_log is None:
+            max_end = min(max_end, active_period_start + timedelta(minutes=open_period_minutes))
+        interval_end = min(interval_end, day_end, max_end)
+
+        delta = (interval_end - current.created_at).total_seconds() / 60.0
+        if delta <= 0:
+            continue
+
+        yield current, interval_end, delta
+
+        if next_log and not _is_work_interval_start(next_log, work_ids):
+            active_period_start = None
+
+
 def _compute_from_logs(db: Session, target_date: date) -> dict:
     """
     Compute worker time per workstation from operation_logs for a given date.
@@ -82,14 +124,7 @@ def _compute_from_logs(db: Session, target_date: date) -> dict:
 
     for (user_id, ws_id, order_no, order_team, order_product_name), ws_logs in user_ws_logs.items():
         total = 0
-        for i in range(len(ws_logs) - 1):
-            current = ws_logs[i]
-            if not _is_work_interval_start(current, work_ids):
-                continue
-            next_log = ws_logs[i + 1]
-            delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
-            if delta > 720:  # 12h safety cap; shifts can exceed 8h with overtime
-                delta = 0
+        for _current, _interval_end, delta in _iter_work_intervals(ws_logs, work_ids, target_date, 720):
             total += delta
         mins = round(total)
         if mins > 0:
@@ -154,15 +189,8 @@ def _compute_worker_shift_percentages(db: Session, target_date: date) -> dict:
 
     shift_minutes_by_ws = {}
     for (user_id, ws_id, _op_id), group in grouped_logs.items():
-        for i in range(len(group) - 1):
-            current = group[i]
-            if not _is_work_interval_start(current, work_ids):
-                continue
-            next_log = group[i + 1]
-            delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
-            if delta <= 0 or delta > 720:
-                continue
-            for label, minutes in _split_interval_by_shift(current.created_at, next_log.created_at).items():
+        for current, interval_end, _delta in _iter_work_intervals(group, work_ids, target_date, 720):
+            for label, minutes in _split_interval_by_shift(current.created_at, interval_end).items():
                 user_ws = shift_minutes_by_ws.setdefault(user_id, {}).setdefault(ws_id, {})
                 user_ws[label] = user_ws.get(label, 0) + minutes
 
@@ -399,15 +427,7 @@ def _compute_machine_from_logs(db: Session, target_date: date) -> dict:
 
     for ws_id, w_logs in ws_logs.items():
         op_minutes = {}
-        for i in range(len(w_logs) - 1):
-            current = w_logs[i]
-            # Only count time when machine is in a work status
-            if not _is_work_interval_start(current, work_ids):
-                continue
-            next_log = w_logs[i + 1]
-            delta = (next_log.created_at - current.created_at).total_seconds() / 60.0
-            if delta > 1440:  # 24h safety cap
-                delta = 0
+        for current, _interval_end, delta in _iter_work_intervals(w_logs, work_ids, target_date, 720):
             op_id = current.operation_id
             user_id = current.user_id
             key = (op_id, user_id)

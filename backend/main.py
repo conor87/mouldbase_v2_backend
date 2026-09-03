@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from typing import Annotated, List
 import asyncio
 from datetime import datetime, timedelta
-from models.service import ServiceWorkstation
+from models.service import ServiceLog, ServiceWorkstation
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
@@ -98,6 +98,79 @@ app.include_router(mes_session_router)
 app.include_router(service_guides_router)
 app.include_router(settings_router)
 
+def auto_release_assigned_workstations(db: Session, released_at: datetime) -> tuple[int, int, int]:
+    production_workstations = (
+        db.query(Workstation)
+        .filter(Workstation.user_id.isnot(None))
+        .all()
+    )
+    service_workstations = (
+        db.query(ServiceWorkstation)
+        .filter(ServiceWorkstation.user_id.isnot(None))
+        .all()
+    )
+
+    user_ids = {
+        ws.user_id
+        for ws in [*production_workstations, *service_workstations]
+        if ws.user_id is not None
+    }
+    users = db.query(Users).filter(Users.id.in_(user_ids)).all() if user_ids else []
+    usernames = {user.id: user.username for user in users}
+
+    production_logs = 0
+    for ws in production_workstations:
+        if ws.current_operation_id:
+            db.add(OperationLog(
+                operation_id=ws.current_operation_id,
+                status_id=ws.status_id,
+                workstation_id=ws.id,
+                user_id=ws.user_id,
+                note="Wylogowanie",
+                created_at=released_at,
+            ))
+            production_logs += 1
+
+    service_logs = 0
+    service_created_at = released_at.isoformat(timespec="seconds")
+    for ws in service_workstations:
+        username = usernames.get(ws.user_id, str(ws.user_id))
+        db.add(ServiceLog(
+            operator=username,
+            created_at=service_created_at,
+            status_service="Wylogowanie",
+            mes_activ_service_id=ws.aktualne_zlecenie_serwisowe_id,
+            mes_activ_changeover_id=ws.aktualne_przezbrojenie_id,
+            status_changeover=None,
+        ))
+        service_logs += 1
+
+    for user_id in user_ids:
+        db.add(MesSessionLog(
+            user_id=user_id,
+            username=usernames.get(user_id, str(user_id)),
+            action="logout",
+            created_at=released_at,
+        ))
+
+    db.query(Workstation).update({
+        Workstation.user_id: None,
+        Workstation.status_id: None,
+        Workstation.current_task_id: None,
+        Workstation.current_operation_id: None
+    })
+    db.query(ServiceWorkstation).update({
+        ServiceWorkstation.user_id: None,
+        ServiceWorkstation.status_changeovers: None,
+        ServiceWorkstation.st: None,
+        ServiceWorkstation.aktualne_przezbrojenie_id: None,
+        ServiceWorkstation.aktualne_zlecenie_serwisowe_id: None,
+        ServiceWorkstation.aktualny_typ_zlecenia: None
+    })
+
+    return production_logs, service_logs, len(user_ids)
+
+
 async def auto_release_workstations_daily():
     while True:
         now = datetime.now()
@@ -118,24 +191,12 @@ async def auto_release_workstations_daily():
             if not enabled:
                 print("[Scheduler] Automatyczne wylogowywanie jest obecnie WYŁĄCZONE. Pomijam zwolnienie stanowisk.")
             else:
-                # Zwolnienie stanowisk produkcyjnych
-                db.query(Workstation).update({
-                    Workstation.user_id: None,
-                    Workstation.status_id: None,
-                    Workstation.current_task_id: None,
-                    Workstation.current_operation_id: None
-                })
-                # Zwolnienie stanowisk serwisowych
-                db.query(ServiceWorkstation).update({
-                    ServiceWorkstation.user_id: None,
-                    ServiceWorkstation.status_changeovers: None,
-                    ServiceWorkstation.st: None,
-                    ServiceWorkstation.aktualne_przezbrojenie_id: None,
-                    ServiceWorkstation.aktualne_zlecenie_serwisowe_id: None,
-                    ServiceWorkstation.aktualny_typ_zlecenia: None
-                })
+                production_logs, service_logs, session_logs = auto_release_assigned_workstations(db, target)
                 db.commit()
-                print("[Scheduler] Wszystkie stanowiska zostały pomyślnie zwolnione.")
+                print(
+                    "[Scheduler] Wszystkie stanowiska zostaly pomyslnie zwolnione. "
+                    f"Logi: produkcja={production_logs}, serwis={service_logs}, sesje={session_logs}."
+                )
         except Exception as e:
             db.rollback()
             print(f"[Scheduler] Błąd podczas zwalniania stanowisk: {e}")
