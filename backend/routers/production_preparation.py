@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from db.database import get_db
 from models.changeovers import Changeover
 from models.mould import Mould
+from models.moulds_book import MouldsBook
 from models.moulds_tpm import CzasReakcji, MouldsTpm, Statusy
 from schemas.production_preparation import (
     PreparationAction,
@@ -37,7 +38,7 @@ PRODUCTION_SQL = text(
     FROM public.produkcja
     WHERE NULLIF(btrim(produkcja_od), '') IS NOT NULL
       AND NULLIF(btrim(produkcja_od), '')::timestamp >= :date_from
-      AND NULLIF(btrim(produkcja_od), '')::timestamp <= :date_to
+      AND NULLIF(btrim(produkcja_od), '')::timestamp < :date_to_exclusive
     ORDER BY planned_start, forma, wyrob
     """
 )
@@ -193,12 +194,29 @@ def _priority(readiness: str, planned_start: datetime, now: datetime) -> str:
 @router.get("/", response_model=list[ProductionPreparationRead])
 async def production_preparation_report(
     db: Session = Depends(get_db),
-    days: int = Query(7, ge=1, le=90),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ):
     now = datetime.now()
+    report_date_from = date_from or now.date()
+    report_date_to = date_to or report_date_from + timedelta(days=2)
+    if report_date_to < report_date_from:
+        raise HTTPException(
+            status_code=400,
+            detail="Data 'do' nie może być wcześniejsza niż data 'od'",
+        )
+
+    range_start = datetime.combine(report_date_from, time.min)
+    range_end_exclusive = datetime.combine(
+        report_date_to + timedelta(days=1),
+        time.min,
+    )
     production_rows = db.execute(
         PRODUCTION_SQL,
-        {"date_from": now, "date_to": now + timedelta(days=days)},
+        {
+            "date_from": range_start,
+            "date_to_exclusive": range_end_exclusive,
+        },
     ).mappings().all()
 
     moulds = db.query(Mould).all()
@@ -209,6 +227,7 @@ async def production_preparation_report(
     }
 
     changeovers = db.query(Changeover).all()
+    changeover_by_id = {changeover.id: changeover for changeover in changeovers}
     graph = _changeover_graph(changeovers)
 
     production_numbers = {
@@ -234,6 +253,23 @@ async def production_preparation_report(
         )
         for tpm in open_tpms:
             tpm_by_mould_id[tpm.mould_id].append(tpm)
+
+    pre_production_check_dates: dict[int, date] = {}
+    if required_mould_ids:
+        checked_rows = (
+            db.query(
+                MouldsBook.mould_id,
+                func.max(MouldsBook.created),
+            )
+            .filter(
+                MouldsBook.mould_id.in_(required_mould_ids),
+                MouldsBook.tpm_type == 4,
+                MouldsBook.opis_zgloszenia.ilike("Sprawdzenie przed produkcją%"),
+            )
+            .group_by(MouldsBook.mould_id)
+            .all()
+        )
+        pre_production_check_dates = dict(checked_rows)
 
     report: list[ProductionPreparationRead] = []
     for row in production_rows:
@@ -275,6 +311,20 @@ async def production_preparation_report(
             reasons,
         ) = _resolve_changeover(required_mould, changeovers, graph, mould_by_id)
 
+        latest_pre_production_check = pre_production_check_dates.get(
+            required_mould.id
+        )
+        if latest_pre_production_check is not None and changeover_info.changeover_id:
+            completed_changeover = changeover_by_id.get(
+                changeover_info.changeover_id
+            )
+            if (
+                completed_changeover is not None
+                and latest_pre_production_check
+                < _changeover_timestamp(completed_changeover)[0].date()
+            ):
+                latest_pre_production_check = None
+
         mould_tpms = tpm_by_mould_id.get(required_mould.id, [])
         tpm_payload = [
             PreparationTpm(
@@ -309,6 +359,20 @@ async def production_preparation_report(
         elif mould_tpms:
             readiness = "requires_tpm"
             reasons.append("Forma ma otwarte TPM-y")
+        elif latest_pre_production_check is None:
+            readiness = "requires_pre_production_check"
+            actions.append(
+                PreparationAction(
+                    type="pre_production_check",
+                    description=(
+                        "Wykonać sprawdzenie przed produkcją w Szczegółach formy "
+                        f"{required_mould.mould_number}"
+                    ),
+                )
+            )
+            reasons.append(
+                "Brak wpisu utworzonego przez przycisk „Sprawdzenie przed produkcją”"
+            )
         else:
             readiness = "ready"
 
