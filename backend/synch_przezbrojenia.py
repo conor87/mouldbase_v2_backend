@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import oracledb
@@ -76,6 +76,18 @@ class SyncResult:
     unchanged: int = 0
     skipped_invalid: int = 0
     skipped_missing_mould: int = 0
+    missing_changeovers: list["MissingChangeover"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class MissingChangeover:
+    order_number: str
+    from_mould_number: str
+    to_mould_number: str
+    available_date: datetime
+    needed_date: datetime
+    missing_from_mould: bool
+    missing_to_mould: bool
 
 
 def required_env(name: str) -> str:
@@ -173,16 +185,114 @@ def load_mould_ids(cursor, changeovers: list[OracleChangeover]) -> dict[str, int
     return {normalize_mould_number(number): mould_id for mould_id, number in cursor}
 
 
+def prepare_missing_changeovers_registry(cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS changeovers_sync_missing (
+            id BIGSERIAL PRIMARY KEY,
+            oracle_order_number TEXT NOT NULL,
+            from_mould_number VARCHAR(128) NOT NULL,
+            to_mould_number VARCHAR(128) NOT NULL,
+            available_date TIMESTAMP NOT NULL,
+            needed_date TIMESTAMP NOT NULL,
+            missing_from_mould BOOLEAN NOT NULL,
+            missing_to_mould BOOLEAN NOT NULL,
+            first_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+            resolved_at TIMESTAMP NULL,
+            UNIQUE (
+                oracle_order_number,
+                from_mould_number,
+                to_mould_number,
+                needed_date
+            )
+        )
+        """
+    )
+    # Pozycje nadal obecne w Oracle zostaną poniżej ponownie oznaczone jako aktywne.
+    cursor.execute(
+        """
+        UPDATE changeovers_sync_missing
+        SET resolved_at = NOW()
+        WHERE resolved_at IS NULL
+        """
+    )
+
+
+def record_missing_changeover(
+    cursor,
+    changeover: OracleChangeover,
+    missing_from_mould: bool,
+    missing_to_mould: bool,
+) -> None:
+    cursor.execute(
+        """
+        INSERT INTO changeovers_sync_missing (
+            oracle_order_number,
+            from_mould_number,
+            to_mould_number,
+            available_date,
+            needed_date,
+            missing_from_mould,
+            missing_to_mould,
+            resolved_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
+        ON CONFLICT (
+            oracle_order_number,
+            from_mould_number,
+            to_mould_number,
+            needed_date
+        )
+        DO UPDATE SET
+            available_date = EXCLUDED.available_date,
+            missing_from_mould = EXCLUDED.missing_from_mould,
+            missing_to_mould = EXCLUDED.missing_to_mould,
+            last_seen = NOW(),
+            resolved_at = NULL
+        """,
+        (
+            changeover.order_number,
+            changeover.from_mould_number,
+            changeover.to_mould_number,
+            changeover.available_date,
+            changeover.needed_date,
+            missing_from_mould,
+            missing_to_mould,
+        ),
+    )
+
+
+def load_unresolved_missing_changeovers(cursor) -> list[MissingChangeover]:
+    cursor.execute(
+        """
+        SELECT
+            oracle_order_number,
+            from_mould_number,
+            to_mould_number,
+            available_date,
+            needed_date,
+            missing_from_mould,
+            missing_to_mould
+        FROM changeovers_sync_missing
+        WHERE resolved_at IS NULL
+        ORDER BY needed_date, oracle_order_number
+        """
+    )
+    return [MissingChangeover(*row) for row in cursor.fetchall()]
+
+
 def sync_changeovers(
     cursor,
     changeovers: list[OracleChangeover],
     skipped_invalid: int = 0,
 ) -> SyncResult:
     result = SyncResult(skipped_invalid=skipped_invalid)
-    mould_ids = load_mould_ids(cursor, changeovers)
 
     # Chroni przed równoczesnym uruchomieniem dwóch kopii synchronizatora.
     cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("synch_przezbrojenia",))
+    prepare_missing_changeovers_registry(cursor)
+    mould_ids = load_mould_ids(cursor, changeovers)
 
     for changeover in changeovers:
         from_mould_id = mould_ids.get(changeover.from_mould_number)
@@ -190,11 +300,21 @@ def sync_changeovers(
 
         if from_mould_id is None or to_mould_id is None:
             result.skipped_missing_mould += 1
+            record_missing_changeover(
+                cursor,
+                changeover,
+                missing_from_mould=from_mould_id is None,
+                missing_to_mould=to_mould_id is None,
+            )
             LOGGER.warning(
-                "Pomijam zamówienie %r: brak formy w PostgreSQL (z=%r, na=%r)",
+                "Zapisuję w rejestrze braków zamówienie %r "
+                "(z=%r%s, na=%r%s, termin=%s)",
                 changeover.order_number,
                 changeover.from_mould_number,
+                " — BRAK" if from_mould_id is None else "",
                 changeover.to_mould_number,
+                " — BRAK" if to_mould_id is None else "",
+                changeover.needed_date,
             )
             continue
 
@@ -253,6 +373,7 @@ def sync_changeovers(
         )
         result.updated += 1
 
+    result.missing_changeovers = load_unresolved_missing_changeovers(cursor)
     return result
 
 
@@ -275,13 +396,34 @@ def main() -> None:
     result = refresh()
     LOGGER.info(
         "Synchronizacja zakończona: dodano=%d, zaktualizowano=%d, "
-        "bez zmian=%d, pominięto niekompletne=%d, pominięto brakujące formy=%d",
+        "bez zmian=%d, pominięto niekompletne=%d, "
+        "zarejestrowano brakujące formy=%d",
         result.inserted,
         result.updated,
         result.unchanged,
         result.skipped_invalid,
         result.skipped_missing_mould,
     )
+
+    if not result.missing_changeovers:
+        LOGGER.info("Raport brakujących form: brak nierozwiązanych pozycji.")
+        return
+
+    LOGGER.warning(
+        "Raport brakujących form — nierozwiązane przezbrojenia: %d",
+        len(result.missing_changeovers),
+    )
+    for missing in result.missing_changeovers:
+        LOGGER.warning(
+            "  zamówienie=%r | z=%s%s | na=%s%s | dostępna=%s | potrzebna=%s",
+            missing.order_number,
+            missing.from_mould_number,
+            " [BRAK W MOULDS]" if missing.missing_from_mould else "",
+            missing.to_mould_number,
+            " [BRAK W MOULDS]" if missing.missing_to_mould else "",
+            missing.available_date,
+            missing.needed_date,
+        )
 
 
 if __name__ == "__main__":
