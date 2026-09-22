@@ -4,10 +4,11 @@ from collections import defaultdict, deque
 from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from db.database import get_db
+from models.calendar import CalendarEntry
 from models.changeovers import Changeover
 from models.mould import Mould
 from models.moulds_book import MouldsBook
@@ -191,6 +192,25 @@ def _priority(readiness: str, planned_start: datetime, now: datetime) -> str:
     return "low"
 
 
+def _calendar_entry_overlaps_production(
+    entry: CalendarEntry,
+    planned_start: datetime,
+    planned_end: datetime | None,
+) -> bool:
+    effective_end = (
+        planned_end
+        if planned_end is not None and planned_end > planned_start
+        else planned_start + timedelta(microseconds=1)
+    )
+    starts_before_production_ends = (
+        entry.start_date is None or entry.start_date < effective_end
+    )
+    ends_after_production_starts = (
+        entry.end_date is None or entry.end_date > planned_start
+    )
+    return starts_before_production_ends and ends_after_production_starts
+
+
 @router.get("/", response_model=list[ProductionPreparationRead])
 async def production_preparation_report(
     db: Session = Depends(get_db),
@@ -271,6 +291,30 @@ async def production_preparation_report(
         )
         pre_production_check_dates = dict(checked_rows)
 
+    calendar_entries_by_mould_id: dict[int, list[CalendarEntry]] = defaultdict(list)
+    if required_mould_ids:
+        relevant_calendar_entries = (
+            db.query(CalendarEntry)
+            .filter(
+                CalendarEntry.mould_id.in_(required_mould_ids),
+                CalendarEntry.is_active.is_(True),
+                or_(
+                    CalendarEntry.start_date.is_(None),
+                    CalendarEntry.start_date < range_end_exclusive,
+                ),
+                or_(
+                    CalendarEntry.end_date.is_(None),
+                    CalendarEntry.end_date > range_start,
+                ),
+            )
+            .order_by(CalendarEntry.start_date.asc(), CalendarEntry.id.asc())
+            .all()
+        )
+        for calendar_entry in relevant_calendar_entries:
+            calendar_entries_by_mould_id[calendar_entry.mould_id].append(
+                calendar_entry
+            )
+
     report: list[ProductionPreparationRead] = []
     for row in production_rows:
         required_number = (row["forma"] or "").strip()
@@ -325,6 +369,16 @@ async def production_preparation_report(
             ):
                 latest_pre_production_check = None
 
+        toolroom_calendar_entries = [
+            entry
+            for entry in calendar_entries_by_mould_id.get(required_mould.id, [])
+            if _calendar_entry_overlaps_production(
+                entry,
+                row["planned_start"],
+                row["planned_end"],
+            )
+        ]
+
         mould_tpms = tpm_by_mould_id.get(required_mould.id, [])
         tpm_payload = [
             PreparationTpm(
@@ -345,11 +399,43 @@ async def production_preparation_report(
                 )
             )
 
+        for calendar_entry in toolroom_calendar_entries:
+            start_label = (
+                calendar_entry.start_date.strftime("%Y-%m-%d %H:%M")
+                if calendar_entry.start_date
+                else "bez daty początkowej"
+            )
+            end_label = (
+                calendar_entry.end_date.strftime("%Y-%m-%d %H:%M")
+                if calendar_entry.end_date
+                else "bez daty końcowej"
+            )
+            comment_suffix = (
+                f" — {calendar_entry.comment.strip()}"
+                if calendar_entry.comment and calendar_entry.comment.strip()
+                else ""
+            )
+            actions.append(
+                PreparationAction(
+                    type="toolroom_calendar",
+                    record_id=calendar_entry.id,
+                    description=(
+                        f"Forma zablokowana przez narzędziownię: "
+                        f"{start_label} – {end_label}{comment_suffix}"
+                    ),
+                )
+            )
+
         has_immediate_tpm = any(
             tpm.tpm_time_type == CzasReakcji.NATYCHMIAST.value
             for tpm in mould_tpms
         )
-        if has_immediate_tpm:
+        if toolroom_calendar_entries:
+            readiness = "blocked"
+            reasons.append(
+                "Termin produkcji nachodzi na pobyt formy w narzędziowni"
+            )
+        elif has_immediate_tpm:
             readiness = "blocked"
             reasons.append("Otwarty TPM wymaga natychmiastowej reakcji")
         elif changeover_info.status == "unknown":

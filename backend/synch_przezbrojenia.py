@@ -282,6 +282,55 @@ def load_unresolved_missing_changeovers(cursor) -> list[MissingChangeover]:
     return [MissingChangeover(*row) for row in cursor.fetchall()]
 
 
+def prepare_sync_status_registry(cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS changeovers_sync_status (
+            sync_name TEXT PRIMARY KEY,
+            last_success_at TIMESTAMPTZ NOT NULL,
+            inserted INTEGER NOT NULL DEFAULT 0,
+            updated INTEGER NOT NULL DEFAULT 0,
+            unchanged INTEGER NOT NULL DEFAULT 0,
+            skipped_invalid INTEGER NOT NULL DEFAULT 0,
+            missing_moulds INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+
+def record_sync_success(cursor, result: SyncResult) -> None:
+    cursor.execute(
+        """
+        INSERT INTO changeovers_sync_status (
+            sync_name,
+            last_success_at,
+            inserted,
+            updated,
+            unchanged,
+            skipped_invalid,
+            missing_moulds
+        )
+        VALUES (%s, NOW(), %s, %s, %s, %s, %s)
+        ON CONFLICT (sync_name)
+        DO UPDATE SET
+            last_success_at = EXCLUDED.last_success_at,
+            inserted = EXCLUDED.inserted,
+            updated = EXCLUDED.updated,
+            unchanged = EXCLUDED.unchanged,
+            skipped_invalid = EXCLUDED.skipped_invalid,
+            missing_moulds = EXCLUDED.missing_moulds
+        """,
+        (
+            "changeovers",
+            result.inserted,
+            result.updated,
+            result.unchanged,
+            result.skipped_invalid,
+            result.skipped_missing_mould,
+        ),
+    )
+
+
 def sync_changeovers(
     cursor,
     changeovers: list[OracleChangeover],
@@ -292,6 +341,7 @@ def sync_changeovers(
     # Chroni przed równoczesnym uruchomieniem dwóch kopii synchronizatora.
     cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("synch_przezbrojenia",))
     prepare_missing_changeovers_registry(cursor)
+    prepare_sync_status_registry(cursor)
     mould_ids = load_mould_ids(cursor, changeovers)
 
     for changeover in changeovers:
@@ -374,6 +424,7 @@ def sync_changeovers(
         result.updated += 1
 
     result.missing_changeovers = load_unresolved_missing_changeovers(cursor)
+    record_sync_success(cursor, result)
     return result
 
 
