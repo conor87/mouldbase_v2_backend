@@ -163,39 +163,24 @@ async def create_changeover(
 @router.get("/", response_model=List[ChangeoverRead])
 async def list_changeovers(
     db: db_dependency,
-    # kompatybilność
-    skip: int = 0,
-    limit: int = 5000,
-
+    skip: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=20000),
     only_open: bool = Query(False, description="Tylko niewykonane"),
-
-    # ✅ nowa logika wyświetlania:
-    done_page: int = Query(1, ge=1, description="Strona zrealizowanych"),
-    done_page_size: int = Query(10, ge=1, le=200, description="Ile zrealizowanych na stronę"),
 ):
-    """
-    Zwraca:
-    - najpierw WSZYSTKIE niewykonane (czy_wykonano = false)
-    - potem zrealizowane (czy_wykonano = true) stronicowane po 10 (done_page_size)
-    """
-    q_open = db.query(Changeover).filter(Changeover.czy_wykonano == False)  # noqa: E712
-    open_rows = q_open.order_by(Changeover.id.desc()).all()
+    """Zwraca wszystkie przezbrojenia: niewykonane, potem wykonane od najnowszych."""
+    query = db.query(Changeover)
 
     if only_open:
-        # opcjonalnie zostawiamy skip/limit dla kompatybilności
-        if skip or limit:
-            return open_rows[skip: skip + limit]
-        return open_rows
+        query = query.filter(Changeover.czy_wykonano == False)  # noqa: E712
 
-    q_done = db.query(Changeover).filter(Changeover.czy_wykonano == True)  # noqa: E712
-    done_skip = (done_page - 1) * done_page_size
-    done_rows = q_done.order_by(Changeover.id.desc()).offset(done_skip).limit(done_page_size).all()
+    query = query.order_by(Changeover.czy_wykonano.asc(), Changeover.id.desc())
 
-    # kompatybilność: jeśli ktoś nadal używa skip/limit na całości
-    rows = open_rows + done_rows
-    if skip or limit:
-        return rows[skip: skip + limit]
-    return rows
+    if skip:
+        query = query.offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+
+    return query.all()
 
 
 @router.get("/{changeover_id}", response_model=ChangeoverRead)
