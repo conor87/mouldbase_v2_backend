@@ -70,7 +70,7 @@ def _connected_moulds(start_id: int, graph: dict[int, set[int]]) -> set[int]:
 
 
 def _changeover_timestamp(changeover: Changeover) -> tuple[datetime, int]:
-    timestamp = changeover.updated or changeover.created or datetime.min
+    timestamp = changeover.needed_date or datetime.min
     return timestamp, changeover.id or 0
 
 

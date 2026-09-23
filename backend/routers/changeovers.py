@@ -173,7 +173,11 @@ async def list_changeovers(
     if only_open:
         query = query.filter(Changeover.czy_wykonano == False)  # noqa: E712
 
-    query = query.order_by(Changeover.czy_wykonano.asc(), Changeover.id.desc())
+    query = query.order_by(
+        Changeover.czy_wykonano.asc(),
+        Changeover.needed_date.desc().nullslast(),
+        Changeover.id.desc(),
+    )
 
     if skip:
         query = query.offset(skip)
