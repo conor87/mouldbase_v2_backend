@@ -6,10 +6,12 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from dotenv import load_dotenv
 
 import oracledb
 import psycopg2
 
+load_dotenv("/etc/synch_przezbrojenia.env", override=False)
 
 LOGGER = logging.getLogger("synch_przezbrojenia")
 SYNC_USER = "oracle_sync"
