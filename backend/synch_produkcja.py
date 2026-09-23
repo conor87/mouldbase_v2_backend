@@ -277,6 +277,7 @@ class SyncResult:
     fetched: int
     inserted: int
     skipped_invalid: int
+    duplicates_removed: int
 
 
 def required_env(name: str) -> str:
@@ -343,6 +344,54 @@ def read_oracle_production(connection) -> tuple[list[OracleProduction], int]:
     return production, skipped
 
 
+def production_preference(row: OracleProduction) -> tuple:
+    completeness = sum(
+        value is not None
+        for value in (row.data, row.nazwa, row.wyrob, row.produkcja_do, row.typ)
+    )
+    return (
+        row.produkcja_do or "",
+        completeness,
+        row.data or "",
+        row.wyrob or "",
+        row.nazwa or "",
+        row.typ if row.typ is not None else -1,
+    )
+
+
+def deduplicate_production(
+    production: list[OracleProduction],
+) -> tuple[list[OracleProduction], int]:
+    deduplicated: list[OracleProduction] = []
+    positions: dict[tuple[str, str], int] = {}
+    duplicates_removed = 0
+
+    for row in production:
+        if row.produkcja_od is None:
+            deduplicated.append(row)
+            continue
+
+        key = (row.forma.upper(), row.produkcja_od)
+        position = positions.get(key)
+        if position is None:
+            positions[key] = len(deduplicated)
+            deduplicated.append(row)
+            continue
+
+        duplicates_removed += 1
+        current = deduplicated[position]
+        if production_preference(row) > production_preference(current):
+            deduplicated[position] = row
+
+    if duplicates_removed:
+        LOGGER.warning(
+            "Usunięto %d duplikatów produkcji według formy i czasu rozpoczęcia.",
+            duplicates_removed,
+        )
+
+    return deduplicated, duplicates_removed
+
+
 def prepare_production_table(cursor) -> None:
     cursor.execute(
         """
@@ -367,8 +416,15 @@ def prepare_sync_status_registry(cursor) -> None:
             last_success_at TIMESTAMP NOT NULL,
             fetched INTEGER NOT NULL DEFAULT 0,
             inserted INTEGER NOT NULL DEFAULT 0,
-            skipped_invalid INTEGER NOT NULL DEFAULT 0
+            skipped_invalid INTEGER NOT NULL DEFAULT 0,
+            duplicates_removed INTEGER NOT NULL DEFAULT 0
         )
+        """
+    )
+    cursor.execute(
+        """
+        ALTER TABLE public.production_sync_status
+        ADD COLUMN IF NOT EXISTS duplicates_removed INTEGER NOT NULL DEFAULT 0
         """
     )
 
@@ -381,16 +437,23 @@ def record_sync_success(cursor, result: SyncResult) -> None:
             last_success_at,
             fetched,
             inserted,
-            skipped_invalid
+            skipped_invalid,
+            duplicates_removed
         )
-        VALUES ('production', NOW(), %s, %s, %s)
+        VALUES ('production', NOW(), %s, %s, %s, %s)
         ON CONFLICT (sync_name) DO UPDATE
         SET last_success_at = EXCLUDED.last_success_at,
             fetched = EXCLUDED.fetched,
             inserted = EXCLUDED.inserted,
-            skipped_invalid = EXCLUDED.skipped_invalid
+            skipped_invalid = EXCLUDED.skipped_invalid,
+            duplicates_removed = EXCLUDED.duplicates_removed
         """,
-        (result.fetched, result.inserted, result.skipped_invalid),
+        (
+            result.fetched,
+            result.inserted,
+            result.skipped_invalid,
+            result.duplicates_removed,
+        ),
     )
 
 
@@ -398,6 +461,7 @@ def sync_production(
     cursor,
     production: list[OracleProduction],
     skipped_invalid: int = 0,
+    duplicates_removed: int = 0,
 ) -> SyncResult:
     if not production:
         raise RuntimeError(
@@ -440,9 +504,10 @@ def sync_production(
     )
 
     result = SyncResult(
-        fetched=len(production) + skipped_invalid,
+        fetched=len(production) + skipped_invalid + duplicates_removed,
         inserted=len(production),
         skipped_invalid=skipped_invalid,
+        duplicates_removed=duplicates_removed,
     )
     record_sync_success(cursor, result)
     return result
@@ -452,9 +517,16 @@ def refresh() -> SyncResult:
     with oracle_connection() as oracle:
         production, skipped_invalid = read_oracle_production(oracle)
 
+    production, duplicates_removed = deduplicate_production(production)
+
     with postgres_connection() as postgres:
         with postgres.cursor() as cursor:
-            result = sync_production(cursor, production, skipped_invalid)
+            result = sync_production(
+                cursor,
+                production,
+                skipped_invalid,
+                duplicates_removed,
+            )
 
     return result
 
@@ -467,10 +539,11 @@ def main() -> None:
     result = refresh()
     LOGGER.info(
         "Synchronizacja produkcji zakończona: pobrano=%d, zapisano=%d, "
-        "pominięto niepoprawne=%d",
+        "pominięto niepoprawne=%d, usunięto duplikaty=%d",
         result.fetched,
         result.inserted,
         result.skipped_invalid,
+        result.duplicates_removed,
     )
 
 

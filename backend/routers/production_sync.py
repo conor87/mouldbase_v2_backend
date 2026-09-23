@@ -49,13 +49,22 @@ def read_sync_status(db: Session) -> dict:
             "fetched": 0,
             "inserted": 0,
             "skipped_invalid": 0,
+            "duplicates_removed": 0,
         }
 
     row = db.execute(
         text(
             """
-            SELECT last_success_at, fetched, inserted, skipped_invalid
-            FROM public.production_sync_status
+            SELECT
+                last_success_at,
+                fetched,
+                inserted,
+                skipped_invalid,
+                COALESCE(
+                    (to_jsonb(status_row) ->> 'duplicates_removed')::integer,
+                    0
+                ) AS duplicates_removed
+            FROM public.production_sync_status AS status_row
             WHERE sync_name = 'production'
             """
         )
@@ -66,6 +75,7 @@ def read_sync_status(db: Session) -> dict:
             "fetched": 0,
             "inserted": 0,
             "skipped_invalid": 0,
+            "duplicates_removed": 0,
         }
     return dict(row)
 
@@ -95,4 +105,5 @@ async def run_sync(db: Session = Depends(get_db)):
         "fetched": result.fetched,
         "inserted": result.inserted,
         "skipped_invalid": result.skipped_invalid,
+        "duplicates_removed": result.duplicates_removed,
     }

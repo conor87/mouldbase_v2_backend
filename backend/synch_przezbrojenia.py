@@ -370,9 +370,11 @@ def sync_changeovers(
             )
             continue
 
+        # Synchronizacja jest dopisująca: istniejących rekordów nie aktualizujemy.
+        # Nowe wystąpienie tej samej pary form w innym terminie nadal jest osobnym wpisem.
         cursor.execute(
             """
-            SELECT id, available_date
+            SELECT id
             FROM changeovers
             WHERE from_mould_id = %s
               AND to_mould_id = %s
@@ -384,46 +386,31 @@ def sync_changeovers(
         )
         existing = cursor.fetchone()
 
-        if existing is None:
-            cursor.execute(
-                """
-                INSERT INTO changeovers (
-                    from_mould_id,
-                    to_mould_id,
-                    available_date,
-                    needed_date,
-                    czy_wykonano,
-                    updated_by
-                )
-                VALUES (%s, %s, %s, %s, FALSE, %s)
-                """,
-                (
-                    from_mould_id,
-                    to_mould_id,
-                    changeover.available_date,
-                    changeover.needed_date,
-                    SYNC_USER,
-                ),
-            )
-            result.inserted += 1
-            continue
-
-        changeover_id, current_available_date = existing
-        if current_available_date == changeover.available_date:
+        if existing is not None:
             result.unchanged += 1
             continue
 
         cursor.execute(
             """
-            UPDATE changeovers
-            SET available_date = %s,
-                updated_by = %s,
-                updated = NOW()
-            WHERE id = %s
+            INSERT INTO changeovers (
+                from_mould_id,
+                to_mould_id,
+                available_date,
+                needed_date,
+                czy_wykonano,
+                updated_by
+            )
+            VALUES (%s, %s, %s, %s, FALSE, %s)
             """,
-            (changeover.available_date, SYNC_USER, changeover_id),
+            (
+                from_mould_id,
+                to_mould_id,
+                changeover.available_date,
+                changeover.needed_date,
+                SYNC_USER,
+            ),
         )
-        result.updated += 1
+        result.inserted += 1
 
     result.missing_changeovers = load_unresolved_missing_changeovers(cursor)
     record_sync_success(cursor, result)
