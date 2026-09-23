@@ -6,10 +6,13 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import date, datetime
+from dotenv import load_dotenv
 
 import oracledb
 import psycopg2
 from psycopg2.extras import execute_values
+
+load_dotenv("/etc/synch_przezbrojenia.env", override=False)
 
 
 LOGGER = logging.getLogger("synch_produkcja")
