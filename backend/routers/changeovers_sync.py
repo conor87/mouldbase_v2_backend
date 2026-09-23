@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import traceback
+from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -12,7 +15,20 @@ from routers.auth import admin_required
 
 
 LOGGER = logging.getLogger("changeovers_sync")
+SYNC_ERROR_LOG_PATH = Path(__file__).resolve().parents[1] / "synch_przezbrojenia_errors.log"
 router = APIRouter(prefix="/changeovers", tags=["changeovers-sync"])
+
+
+def write_sync_error_log(exc: Exception) -> None:
+    try:
+        with SYNC_ERROR_LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(
+                f"\n{datetime.now().astimezone().isoformat()} "
+                "Nie udało się zsynchronizować przezbrojeń\n"
+            )
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=log_file)
+    except OSError:
+        LOGGER.exception("Nie udało się zapisać pliku logu synchronizacji")
 
 
 def get_db():
@@ -77,6 +93,7 @@ async def run_sync(db: Session = Depends(get_db)):
         result = await run_in_threadpool(refresh)
     except Exception as exc:
         LOGGER.exception("Nie udało się zsynchronizować przezbrojeń")
+        write_sync_error_log(exc)
         raise HTTPException(
             status_code=502,
             detail="Synchronizacja przezbrojeń nie powiodła się. Sprawdź log backendu.",
