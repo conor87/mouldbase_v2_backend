@@ -80,6 +80,16 @@ def _resolve_changeover(
     graph: dict[int, set[int]],
     mould_by_id: dict[int, Mould],
 ) -> tuple[int | None, str | None, bool, PreparationChangeover, list[PreparationAction], list[str]]:
+    if not bool(required_mould.czy_przezbrajalna):
+        return (
+            required_mould.id,
+            required_mould.mould_number,
+            False,
+            PreparationChangeover(status="not_required"),
+            [],
+            [],
+        )
+
     connected = _connected_moulds(required_mould.id, graph)
     has_changeover_history = any(mould_id != required_mould.id for mould_id in connected)
 
