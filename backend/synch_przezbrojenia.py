@@ -122,6 +122,17 @@ def normalize_mould_number(value: object) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def is_completed_confirmation(value: object) -> bool:
+    if value is None:
+        return False
+    read_value = getattr(value, "read", None)
+    if callable(read_value):
+        value = read_value()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    return str(value).strip().upper() == "T"
+
+
 def read_oracle_changeovers(connection) -> tuple[list[OracleChangeover], int]:
     changeovers: list[OracleChangeover] = []
     skipped = 0
@@ -161,7 +172,7 @@ def read_oracle_changeovers(connection) -> tuple[list[OracleChangeover], int]:
                     from_mould_number=from_number,
                     to_mould_number=to_number,
                     needed_date=needed_date,
-                    is_completed=str(row[1] or "").strip().upper() == "T",
+                    is_completed=is_completed_confirmation(row[1]),
                 )
             )
 
@@ -372,11 +383,12 @@ def sync_changeovers(
             )
             continue
 
-        # Synchronizacja jest dopisująca: istniejących rekordów nie aktualizujemy.
+        # Synchronizacja nie dubluje istniejących rekordów. Jedyny wyjątek to
+        # jednokierunkowe potwierdzenie wykonania (FALSE -> TRUE) zgodne z Oracle.
         # Nowe wystąpienie tej samej pary form w innym terminie nadal jest osobnym wpisem.
         cursor.execute(
             """
-            SELECT id
+            SELECT id, czy_wykonano
             FROM changeovers
             WHERE from_mould_id = %s
               AND to_mould_id = %s
@@ -389,7 +401,20 @@ def sync_changeovers(
         existing = cursor.fetchone()
 
         if existing is not None:
-            result.unchanged += 1
+            if changeover.is_completed and not bool(existing[1]):
+                cursor.execute(
+                    """
+                    UPDATE changeovers
+                    SET czy_wykonano = TRUE,
+                        updated_by = %s,
+                        updated = NOW()
+                    WHERE id = %s
+                    """,
+                    (SYNC_USER, existing[0]),
+                )
+                result.updated += 1
+            else:
+                result.unchanged += 1
             continue
 
         cursor.execute(
