@@ -80,6 +80,40 @@ def _resolve_changeover(
     graph: dict[int, set[int]],
     mould_by_id: dict[int, Mould],
 ) -> tuple[int | None, str | None, bool, PreparationChangeover, list[PreparationAction], list[str]]:
+    planned = next(
+        (
+            changeover
+            for changeover in sorted(changeovers, key=_changeover_timestamp, reverse=True)
+            if not changeover.czy_wykonano
+            and changeover.to_mould_id == required_mould.id
+        ),
+        None,
+    )
+    if planned is not None:
+        current_mould_id = planned.from_mould_id
+        current_mould = mould_by_id.get(current_mould_id)
+        current_mould_number = current_mould.mould_number if current_mould else str(current_mould_id)
+        return (
+            current_mould_id,
+            current_mould_number,
+            True,
+            PreparationChangeover(
+                status="planned",
+                changeover_id=planned.id,
+                from_mould_id=planned.from_mould_id,
+                to_mould_id=planned.to_mould_id,
+                needed_date=planned.needed_date,
+            ),
+            [
+                PreparationAction(
+                    type="changeover",
+                    record_id=planned.id,
+                    description=f"Wykonać przezbrojenie {current_mould_number} → {required_mould.mould_number}",
+                )
+            ],
+            ["Zaplanowane przezbrojenie nie zostało jeszcze wykonane"],
+        )
+
     if not bool(required_mould.czy_przezbrajalna):
         return (
             required_mould.id,
@@ -144,42 +178,16 @@ def _resolve_changeover(
             [],
         )
 
-    planned = next(
-        (
-            changeover
-            for changeover in sorted(changeovers, key=_changeover_timestamp, reverse=True)
-            if not changeover.czy_wykonano
-            and changeover.from_mould_id == current_mould_id
-            and changeover.to_mould_id == required_mould.id
-        ),
-        None,
+    changeover_info = PreparationChangeover(
+        status="missing",
+        from_mould_id=current_mould_id,
+        to_mould_id=required_mould.id,
     )
-
-    if planned:
-        changeover_info = PreparationChangeover(
-            status="planned",
-            changeover_id=planned.id,
-            from_mould_id=planned.from_mould_id,
-            to_mould_id=planned.to_mould_id,
-            needed_date=planned.needed_date,
-        )
-        action = PreparationAction(
-            type="changeover",
-            record_id=planned.id,
-            description=f"Wykonać przezbrojenie {current_mould_number} → {required_mould.mould_number}",
-        )
-        reason = "Zaplanowane przezbrojenie nie zostało jeszcze wykonane"
-    else:
-        changeover_info = PreparationChangeover(
-            status="missing",
-            from_mould_id=current_mould_id,
-            to_mould_id=required_mould.id,
-        )
-        action = PreparationAction(
-            type="create_changeover",
-            description=f"Zaplanować przezbrojenie {current_mould_number} → {required_mould.mould_number}",
-        )
-        reason = "Aktualna wersja formy nie odpowiada wersji wymaganej przez produkcję"
+    action = PreparationAction(
+        type="create_changeover",
+        description=f"Zaplanować przezbrojenie {current_mould_number} → {required_mould.mould_number}",
+    )
+    reason = "Aktualna wersja formy nie odpowiada wersji wymaganej przez produkcję"
 
     return (
         current_mould_id,
