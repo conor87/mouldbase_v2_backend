@@ -69,6 +69,7 @@ class OracleChangeover:
     from_mould_number: str
     to_mould_number: str
     needed_date: datetime
+    is_completed: bool
 
 
 @dataclass
@@ -160,6 +161,7 @@ def read_oracle_changeovers(connection) -> tuple[list[OracleChangeover], int]:
                     from_mould_number=from_number,
                     to_mould_number=to_number,
                     needed_date=needed_date,
+                    is_completed=str(row[1] or "").strip().upper() == "T",
                 )
             )
 
@@ -400,13 +402,14 @@ def sync_changeovers(
                 czy_wykonano,
                 updated_by
             )
-            VALUES (%s, %s, %s, %s, FALSE, %s)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (
                 from_mould_id,
                 to_mould_id,
                 changeover.available_date,
                 changeover.needed_date,
+                changeover.is_completed,
                 SYNC_USER,
             ),
         )
