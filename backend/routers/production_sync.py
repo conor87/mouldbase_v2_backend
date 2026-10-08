@@ -5,7 +5,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -86,7 +86,11 @@ async def get_sync_status(db: Session = Depends(get_db)):
 
 
 @router.get("/sync/logs", dependencies=[Depends(superadmin_required)])
-async def get_sync_logs(db: Session = Depends(get_db)):
+async def get_sync_logs(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
     table_exists = db.execute(
         text("SELECT to_regclass('public.production_sync_status')")
     ).scalar()
@@ -95,19 +99,56 @@ async def get_sync_logs(db: Session = Depends(get_db)):
         row = db.execute(
             text(
                 """
-                SELECT last_success_at, skipped_invalid,
-                       to_jsonb(status_row) -> 'skipped_rows' AS items
-                FROM public.production_sync_status AS status_row
-                WHERE sync_name = 'production'
+                WITH source AS (
+                    SELECT last_success_at, skipped_invalid,
+                           to_jsonb(status_row) -> 'skipped_rows' AS raw_items
+                    FROM public.production_sync_status AS status_row
+                    WHERE sync_name = 'production'
+                ), normalized AS (
+                    SELECT last_success_at, skipped_invalid,
+                           COALESCE(jsonb_typeof(raw_items) = 'array', false)
+                               AS details_available,
+                           CASE WHEN jsonb_typeof(raw_items) = 'array'
+                                THEN raw_items ELSE '[]'::jsonb END AS all_items
+                    FROM source
+                ), counted AS (
+                    SELECT *, jsonb_array_length(all_items) AS total
+                    FROM normalized
+                ), paged AS (
+                    SELECT *, GREATEST(1, (total + :page_size - 1) / :page_size)
+                                  AS total_pages,
+                           LEAST(:page, GREATEST(1, (total + :page_size - 1) / :page_size))
+                                  AS page
+                    FROM counted
+                )
+                SELECT last_success_at, skipped_invalid, details_available,
+                       total, page, :page_size AS page_size, total_pages,
+                       COALESCE((
+                           SELECT jsonb_agg(entry.item ORDER BY entry.position)
+                           FROM (
+                               SELECT item, position
+                               FROM jsonb_array_elements(all_items)
+                                   WITH ORDINALITY AS entries(item, position)
+                               ORDER BY position
+                               LIMIT :page_size OFFSET ((page - 1)::bigint * :page_size)
+                           ) AS entry
+                       ), '[]'::jsonb) AS items
+                FROM paged
                 """
-            )
+            ),
+            {"page": page, "page_size": page_size},
         ).mappings().first()
-    items = row["items"] if row else None
+    if row is not None:
+        return dict(row)
     return {
-        "last_success_at": row["last_success_at"] if row else None,
-        "skipped_invalid": row["skipped_invalid"] if row else 0,
-        "details_available": isinstance(items, list),
-        "items": items if isinstance(items, list) else [],
+        "last_success_at": None,
+        "skipped_invalid": 0,
+        "details_available": False,
+        "total": 0,
+        "page": 1,
+        "page_size": page_size,
+        "total_pages": 1,
+        "items": [],
     }
 
 
