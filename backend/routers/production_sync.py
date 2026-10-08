@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db.database import SessionLocal
-from routers.auth import admin_required
+from routers.auth import admin_required, superadmin_required
 
 
 LOGGER = logging.getLogger("production_sync")
@@ -83,6 +83,32 @@ def read_sync_status(db: Session) -> dict:
 @router.get("/sync/status")
 async def get_sync_status(db: Session = Depends(get_db)):
     return read_sync_status(db)
+
+
+@router.get("/sync/logs", dependencies=[Depends(superadmin_required)])
+async def get_sync_logs(db: Session = Depends(get_db)):
+    table_exists = db.execute(
+        text("SELECT to_regclass('public.production_sync_status')")
+    ).scalar()
+    row = None
+    if table_exists is not None:
+        row = db.execute(
+            text(
+                """
+                SELECT last_success_at, skipped_invalid,
+                       to_jsonb(status_row) -> 'skipped_rows' AS items
+                FROM public.production_sync_status AS status_row
+                WHERE sync_name = 'production'
+                """
+            )
+        ).mappings().first()
+    items = row["items"] if row else None
+    return {
+        "last_success_at": row["last_success_at"] if row else None,
+        "skipped_invalid": row["skipped_invalid"] if row else 0,
+        "details_available": isinstance(items, list),
+        "items": items if isinstance(items, list) else [],
+    }
 
 
 @router.post("/sync", dependencies=[Depends(admin_required)])

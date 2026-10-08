@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 import oracledb
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json, execute_values
 
 load_dotenv("/etc/synch_przezbrojenia.env", override=False)
 
@@ -316,16 +316,29 @@ def normalized_text(value) -> str | None:
     return text or None
 
 
-def read_oracle_production(connection) -> tuple[list[OracleProduction], int]:
+def read_oracle_production(
+    connection,
+    skipped_rows: list[dict] | None = None,
+) -> tuple[list[OracleProduction], int]:
     production: list[OracleProduction] = []
     skipped = 0
 
     with connection.cursor() as cursor:
         cursor.execute(ORACLE_QUERY)
-        for row in cursor:
+        for row_number, row in enumerate(cursor, start=1):
             forma = normalized_text(row[0])
             if not forma:
                 skipped += 1
+                if skipped_rows is not None:
+                    skipped_rows.append({
+                        "row_number": row_number,
+                        "mould_number": normalized_text(row[0]),
+                        "product": normalized_text(row[2]),
+                        "product_code": normalized_text(row[3]),
+                        "planned_start": normalized_text(row[4]),
+                        "planned_end": normalized_text(row[5]),
+                        "reason": "Brak numeru formy w danych źródłowych Oracle",
+                    })
                 LOGGER.warning("Pomijam wiersz produkcji bez numeru formy: %r", row)
                 continue
 
@@ -427,9 +440,19 @@ def prepare_sync_status_registry(cursor) -> None:
         ADD COLUMN IF NOT EXISTS duplicates_removed INTEGER NOT NULL DEFAULT 0
         """
     )
+    cursor.execute(
+        """
+        ALTER TABLE public.production_sync_status
+        ADD COLUMN IF NOT EXISTS skipped_rows JSONB
+        """
+    )
 
 
-def record_sync_success(cursor, result: SyncResult) -> None:
+def record_sync_success(
+    cursor,
+    result: SyncResult,
+    skipped_rows: list[dict] | None = None,
+) -> None:
     cursor.execute(
         """
         INSERT INTO public.production_sync_status (
@@ -438,21 +461,24 @@ def record_sync_success(cursor, result: SyncResult) -> None:
             fetched,
             inserted,
             skipped_invalid,
-            duplicates_removed
+            duplicates_removed,
+            skipped_rows
         )
-        VALUES ('production', NOW(), %s, %s, %s, %s)
+        VALUES ('production', NOW(), %s, %s, %s, %s, %s)
         ON CONFLICT (sync_name) DO UPDATE
         SET last_success_at = EXCLUDED.last_success_at,
             fetched = EXCLUDED.fetched,
             inserted = EXCLUDED.inserted,
             skipped_invalid = EXCLUDED.skipped_invalid,
-            duplicates_removed = EXCLUDED.duplicates_removed
+            duplicates_removed = EXCLUDED.duplicates_removed,
+            skipped_rows = EXCLUDED.skipped_rows
         """,
         (
             result.fetched,
             result.inserted,
             result.skipped_invalid,
             result.duplicates_removed,
+            Json(skipped_rows) if skipped_rows is not None else None,
         ),
     )
 
@@ -462,6 +488,7 @@ def sync_production(
     production: list[OracleProduction],
     skipped_invalid: int = 0,
     duplicates_removed: int = 0,
+    skipped_rows: list[dict] | None = None,
 ) -> SyncResult:
     if not production:
         raise RuntimeError(
@@ -509,13 +536,14 @@ def sync_production(
         skipped_invalid=skipped_invalid,
         duplicates_removed=duplicates_removed,
     )
-    record_sync_success(cursor, result)
+    record_sync_success(cursor, result, skipped_rows)
     return result
 
 
 def refresh() -> SyncResult:
+    skipped_rows: list[dict] = []
     with oracle_connection() as oracle:
-        production, skipped_invalid = read_oracle_production(oracle)
+        production, skipped_invalid = read_oracle_production(oracle, skipped_rows)
 
     production, duplicates_removed = deduplicate_production(production)
 
@@ -526,6 +554,7 @@ def refresh() -> SyncResult:
                 production,
                 skipped_invalid,
                 duplicates_removed,
+                skipped_rows,
             )
 
     return result
