@@ -338,6 +338,14 @@ def read_oracle_production(
                         "planned_start": normalized_text(row[4]),
                         "planned_end": normalized_text(row[5]),
                         "reason": "Brak numeru formy w danych źródłowych Oracle",
+                        "source_row": {
+                            column[0]: (
+                                value
+                                if value is None or isinstance(value, (str, int, float, bool))
+                                else normalized_text(value)
+                            )
+                            for column, value in zip(cursor.description, row)
+                        },
                     })
                 LOGGER.warning("Pomijam wiersz produkcji bez numeru formy: %r", row)
                 continue
