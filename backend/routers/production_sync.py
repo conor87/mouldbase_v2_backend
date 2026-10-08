@@ -111,6 +111,49 @@ async def get_sync_logs(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/sync/items", dependencies=[Depends(superadmin_required)])
+async def get_sync_items(db: Session = Depends(get_db)):
+    tables = db.execute(
+        text(
+            """
+            SELECT to_regclass('public.produkcja') AS production,
+                   to_regclass('public.production_sync_status') AS status
+            """
+        )
+    ).mappings().first()
+    if tables["production"] is None:
+        return {"last_success_at": None, "items": []}
+
+    last_success_sql = (
+        "(SELECT last_success_at FROM public.production_sync_status "
+        "WHERE sync_name = 'production')"
+        if tables["status"] is not None
+        else "NULL::timestamp"
+    )
+    row = db.execute(
+        text(
+            f"""
+            SELECT {last_success_sql} AS last_success_at,
+                   COALESCE(
+                       jsonb_agg(to_jsonb(synced) ORDER BY
+                           synced.mould_number, synced.planned_start, synced.product_code),
+                       '[]'::jsonb
+                   ) AS items
+            FROM (
+                SELECT forma AS mould_number,
+                       COALESCE(to_jsonb(production_row) ->> 'data',
+                                to_jsonb(production_row) ->> 'DATA') AS source_date,
+                       nazwa AS product, wyrob AS product_code,
+                       produkcja_od AS planned_start, produkcja_do AS planned_end,
+                       typ AS production_type
+                FROM public.produkcja AS production_row
+            ) AS synced
+            """
+        )
+    ).mappings().first()
+    return dict(row)
+
+
 @router.post("/sync", dependencies=[Depends(admin_required)])
 async def run_sync(db: Session = Depends(get_db)):
     try:
