@@ -40,6 +40,12 @@ PRODUCTION_SQL = text(
     WHERE NULLIF(btrim(produkcja_od), '') IS NOT NULL
       AND NULLIF(btrim(produkcja_od), '')::timestamp >= :date_from
       AND NULLIF(btrim(produkcja_od), '')::timestamp < :date_to_exclusive
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.current_sv AS machine
+          WHERE NULLIF(btrim(machine.tools::text), '') IS NOT NULL
+            AND upper(btrim(machine.tools::text)) = upper(btrim(produkcja.forma))
+      )
     ORDER BY planned_start, forma, wyrob
     """
 )
