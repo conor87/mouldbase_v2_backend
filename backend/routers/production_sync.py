@@ -186,7 +186,8 @@ async def get_sync_items(db: Session = Depends(get_db)):
                                 to_jsonb(production_row) ->> 'DATA') AS source_date,
                        nazwa AS product, wyrob AS product_code,
                        produkcja_od AS planned_start, produkcja_do AS planned_end,
-                       typ AS production_type
+                       typ AS production_type,
+                       to_jsonb(production_row) ->> 'workstation_name' AS workstation_name
                 FROM public.produkcja AS production_row
             ) AS synced
             """

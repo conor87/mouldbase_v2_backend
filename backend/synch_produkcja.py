@@ -18,6 +18,30 @@ load_dotenv("/etc/synch_przezbrojenia.env", override=False)
 LOGGER = logging.getLogger("synch_produkcja")
 
 ORACLE_QUERY = r"""
+WITH production_stations AS (
+    SELECT DISTINCT
+        pom.INDEKS_CZESCI AS forma,
+        COALESCE(TRIM(sr.NAZWA_SKROCONA), TRIM(sr.NAZWA), TRIM(sr.SYMBOL)) AS workstation_name,
+        DENSE_RANK() OVER (
+            PARTITION BY pom.INDEKS_CZESCI
+            ORDER BY
+                mrp_harm_pcg.opcja_data_konca((
+                    SELECT MAX(hoz.ID) FROM mrp_harm_opcje_zlecen hoz
+                    WHERE hoz.NUMER_ZLECENIA = hop.NUMER_ZLECENIA
+                )) - ratio_01_lamela_harm.DAJ_CZAS_ZLEC_H((
+                    SELECT MAX(hoz.ID) FROM mrp_harm_opcje_zlecen hoz
+                    WHERE hoz.NUMER_ZLECENIA = hop.NUMER_ZLECENIA
+                )) / 24 NULLS LAST
+        ) AS production_rank
+    FROM mrp_wykorzystanie_prz_pom_mz pom
+    INNER JOIN mrp_harm_operacje hop ON pom.ID_OPERACJI = hop.ID_MZ
+    LEFT JOIN stanowiska_robocze sr ON sr.NUMER = hop.STANOWISKO
+    WHERE hop.ID_HARM IN (971367, 971374, 971380, 896750)
+      AND NVL((
+          SELECT NVL(sz.status_l, 'Otwarte') FROM ratio_harm_statusy_zlecen sz
+          WHERE sz.NUMER_ZLECENIA = hop.NUMER_ZLECENIA
+      ), 'Otwarte') = 'Otwarte'
+)
 SELECT
     q.forma,
     q.data,
@@ -97,7 +121,13 @@ WHEN (INstr(UPPER(i.Nazwa_Czesci),'NAWADNIAJĄCY',1,1)>0) THEN 55
 WHEN (INstr(UPPER(i.Nazwa_Czesci),'MISA JERSEY 300-',1,1)>0) THEN 56
 WHEN (INstr(UPPER(i.Nazwa_Czesci),'MISA JERSEY 240-',1,1)>0) THEN 56
 WHEN (INstr(UPPER(i.Nazwa_Czesci),'MISA WISZĄCA JERSEY 240-',1,1)>0) THEN 56
-ELSE 66 END AS typ
+ELSE 66 END AS typ,
+    (
+        SELECT LISTAGG(stations.workstation_name, ', ')
+                   WITHIN GROUP (ORDER BY stations.workstation_name)
+        FROM production_stations stations
+        WHERE stations.forma = q.forma AND stations.production_rank = 1
+    ) AS workstation_name
 FROM (
 SELECT
     s.TOOLS AS forma,
@@ -270,6 +300,7 @@ class OracleProduction:
     produkcja_od: str | None
     produkcja_do: str | None
     typ: int | None
+    workstation_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -359,6 +390,7 @@ def read_oracle_production(
                     produkcja_od=normalized_text(row[4]),
                     produkcja_do=normalized_text(row[5]),
                     typ=int(row[6]) if row[6] is not None else None,
+                    workstation_name=normalized_text(row[7]),
                 )
             )
 
@@ -368,7 +400,7 @@ def read_oracle_production(
 def production_preference(row: OracleProduction) -> tuple:
     completeness = sum(
         value is not None
-        for value in (row.data, row.nazwa, row.wyrob, row.produkcja_do, row.typ)
+        for value in (row.data, row.nazwa, row.wyrob, row.produkcja_do, row.typ, row.workstation_name)
     )
     return (
         row.produkcja_do or "",
@@ -377,6 +409,7 @@ def production_preference(row: OracleProduction) -> tuple:
         row.wyrob or "",
         row.nazwa or "",
         row.typ if row.typ is not None else -1,
+        row.workstation_name or "",
     )
 
 
@@ -423,9 +456,14 @@ def prepare_production_table(cursor) -> None:
             wyrob TEXT,
             produkcja_od TEXT,
             produkcja_do TEXT,
-            typ INTEGER
+            typ INTEGER,
+            workstation_name TEXT
         )
         """
+    )
+
+    cursor.execute(
+        "ALTER TABLE public.produkcja ADD COLUMN IF NOT EXISTS workstation_name TEXT"
     )
 
 
@@ -519,7 +557,8 @@ def sync_production(
             wyrob,
             produkcja_od,
             produkcja_do,
-            typ
+            typ,
+            workstation_name
         )
         VALUES %s
         """,
@@ -532,6 +571,7 @@ def sync_production(
                 row.produkcja_od,
                 row.produkcja_do,
                 row.typ,
+                row.workstation_name,
             )
             for row in production
         ],

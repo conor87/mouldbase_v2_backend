@@ -34,6 +34,7 @@ PRODUCTION_SQL = text(
         nazwa,
         wyrob,
         typ,
+        to_jsonb(produkcja) ->> 'workstation_name' AS workstation_name,
         NULLIF(btrim(produkcja_od), '')::timestamp AS planned_start,
         NULLIF(btrim(produkcja_do), '')::timestamp AS planned_end
     FROM public.produkcja
@@ -360,6 +361,7 @@ async def production_preparation_report(
                     planned_start=row["planned_start"],
                     planned_end=row["planned_end"],
                     production_type=row["typ"],
+                    workstation_name=row["workstation_name"],
                     readiness=readiness,
                     priority=_priority(readiness, row["planned_start"], now),
                     changeover_required=False,
@@ -498,6 +500,7 @@ async def production_preparation_report(
                 planned_start=row["planned_start"],
                 planned_end=row["planned_end"],
                 production_type=row["typ"],
+                workstation_name=row["workstation_name"],
                 readiness=readiness,
                 priority=_priority(readiness, row["planned_start"], now),
                 changeover_required=changeover_required,

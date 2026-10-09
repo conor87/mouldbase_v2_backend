@@ -37,6 +37,7 @@ class ProductionPreparationRead(BaseModel):
     planned_start: datetime
     planned_end: Optional[datetime] = None
     production_type: Optional[int] = None
+    workstation_name: Optional[str] = None
     readiness: str
     priority: str
     changeover_required: bool
