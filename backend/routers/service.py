@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from db.database import db_dependency
 from models.service import ServiceWorkstation, ServiceLog
 from models.user import Users
-from routers.auth import user_required, admin_required, superadmin_required
+from routers.auth import user_required, admin_required, superadmin_required, user_dependency
 from schemas.service import (
     ServiceWorkstationCreate,
     ServiceWorkstationUpdate,
@@ -38,9 +38,20 @@ def commit_or_409(db: Session, detail: str):
 
 # ─── Service Workstations ───────────────────────────────────────────────────
 
-@router.get("/workstations", response_model=List[ServiceWorkstationRead])
+@router.get("/workstations", response_model=List[ServiceWorkstationRead], dependencies=[Depends(user_required)])
 async def list_service_workstations(db: db_dependency):
-    return db.query(ServiceWorkstation).order_by(ServiceWorkstation.nazwa_stanowiska.asc()).all()
+    rows = (
+        db.query(ServiceWorkstation, Users.username)
+        .outerjoin(Users, Users.id == ServiceWorkstation.user_id)
+        .order_by(ServiceWorkstation.nazwa_stanowiska.asc())
+        .all()
+    )
+    return [
+        ServiceWorkstationRead.model_validate(workstation).model_copy(
+            update={"operator_username": username}
+        )
+        for workstation, username in rows
+    ]
 
 
 @router.post("/workstations", response_model=ServiceWorkstationRead, dependencies=[Depends(admin_required)])
@@ -56,10 +67,26 @@ async def create_service_workstation(payload: ServiceWorkstationCreate, db: db_d
 
 
 @router.put("/workstations/{workstation_id}", response_model=ServiceWorkstationRead, dependencies=[Depends(user_required)])
-async def update_service_workstation(workstation_id: int, payload: ServiceWorkstationUpdate, db: db_dependency):
-    obj = require_row(db, ServiceWorkstation, workstation_id, "Service workstation")
+async def update_service_workstation(
+    workstation_id: int,
+    payload: ServiceWorkstationUpdate,
+    db: db_dependency,
+    user: user_dependency,
+):
+    obj = (
+        db.query(ServiceWorkstation)
+        .filter(ServiceWorkstation.id == workstation_id)
+        .with_for_update()
+        .first()
+    )
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Nie znaleziono stanowiska serwisowego")
+    if obj.user_id is not None and obj.user_id != user["id"]:
+        raise HTTPException(status_code=409, detail="Stanowisko jest zajęte przez innego użytkownika")
     data = payload.model_dump(exclude_unset=True)
     if "user_id" in data and data["user_id"] is not None:
+        if data["user_id"] != user["id"]:
+            raise HTTPException(status_code=403, detail="Stanowisko można przypisać tylko do siebie")
         require_row(db, Users, data["user_id"], "User")
     for key, value in data.items():
         setattr(obj, key, value)

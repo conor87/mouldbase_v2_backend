@@ -32,6 +32,7 @@ class ServiceWorkstationUpdate(BaseModel):
 class ServiceWorkstationRead(ServiceWorkstationBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    operator_username: Optional[str] = None
 
 
 # ─── Service Log ──────────────────────────────────────────────────────────────
