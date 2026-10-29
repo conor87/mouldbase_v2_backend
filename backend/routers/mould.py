@@ -1,5 +1,5 @@
 # routers/mould.py
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Path, Response
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, Path, Response, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
@@ -48,6 +48,7 @@ async def create_mould(
     company: str = Form("Lamela"),
     czy_przezbrajalna: bool = Form(False),
     num_of_cavities: Optional[str] = Form(None),
+    storage_location: Optional[str] = Form(None),
     tool_weight: Optional[str] = Form(None),
     total_cycles: int = Form(0),
     to_maint_cycles: int = Form(0),
@@ -120,6 +121,7 @@ async def create_mould(
         company=company,
         czy_przezbrajalna=czy_przezbrajalna,
         num_of_cavities=num_of_cavities,
+        storage_location=(storage_location or "").strip() or None,
         notes=notes,
         tool_weight=tool_weight,
         total_cycles=total_cycles,
@@ -221,6 +223,7 @@ async def get_mould(mould_number: str, db: db_dependency):
 # =========================
 @router.put("/{mould_number}", response_model=MouldReadWithTpm, dependencies=[Depends(admin_required)])
 async def update_mould(
+    request: Request,
     mould_number: str = Path(...),
 
     new_mould_number: Optional[str] = Form(None),
@@ -229,6 +232,7 @@ async def update_mould(
     company: Optional[str] = Form(None),
     czy_przezbrajalna: Optional[bool] = Form(None),
     num_of_cavities: Optional[str] = Form(None),
+    storage_location: Optional[str] = Form(None),
     tool_weight: Optional[str] = Form(None),
     total_cycles: Optional[int] = Form(None),
     to_maint_cycles: Optional[int] = Form(None),
@@ -285,6 +289,8 @@ async def update_mould(
         m.czy_przezbrajalna = czy_przezbrajalna
     if num_of_cavities is not None:
         m.num_of_cavities = num_of_cavities
+    if "storage_location" in await request.form():
+        m.storage_location = (storage_location or "").strip() or None
     if tool_weight is not None:
         m.tool_weight = tool_weight
     if total_cycles is not None:

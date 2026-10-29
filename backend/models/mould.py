@@ -39,6 +39,7 @@ class Mould(Base):
     extra_photo_5 = Column(Text, nullable=True)
 
     num_of_cavities = Column(String(128), nullable=True)
+    storage_location = Column(Text, nullable=True)
     tool_weight = Column(String(128), nullable=True)
     total_cycles = Column(Integer, nullable=False, default=0)
     to_maint_cycles = Column(Integer, nullable=False, default=0)

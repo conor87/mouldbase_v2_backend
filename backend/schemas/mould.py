@@ -8,6 +8,7 @@ class MouldBase(BaseModel):
     product: Optional[str] = ""
     released: Optional[date] = None
     num_of_cavities: Optional[str] = None
+    storage_location: Optional[str] = None
     company: Optional[str] = None
     czy_przezbrajalna: Optional[bool] = False
     tool_weight: Optional[str] = None

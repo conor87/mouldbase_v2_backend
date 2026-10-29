@@ -79,6 +79,7 @@ app.add_middleware(
        
 Base.metadata.create_all(bind=engine)
 with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE moulds ADD COLUMN IF NOT EXISTS storage_location TEXT"))
     conn.execute(text("ALTER TABLE service_guides ADD COLUMN IF NOT EXISTS mould_id INTEGER"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_service_guides_mould_id ON service_guides (mould_id)"))
     conn.execute(text("ALTER TABLE service_guide_steps ADD COLUMN IF NOT EXISTS extra_photo_1 TEXT"))
