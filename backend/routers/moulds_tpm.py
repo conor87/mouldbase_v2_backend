@@ -84,12 +84,15 @@ async def create_tpm(
 async def read_molds_tpms(
     db: db_dependency,
     search: str | None = Query(None, description="Szukana forma"),
+    mould_id: int | None = Query(None, description="Dokładne ID formy"),
     skip: int = 0,
     limit: int = 1000,
 ):
     query = db.query(MouldsTpm)
 
-    if search:
+    if mould_id is not None:
+        query = query.filter(MouldsTpm.mould_id == mould_id)
+    elif search:
         like = f"%{search}%"
         query = query.filter(
             MouldsTpm.mould.has(Mould.mould_number.ilike(like))
