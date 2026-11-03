@@ -22,23 +22,23 @@ SOURCE_COLUMNS = {
 
 ENTRIES_SQL = """
     WITH machine_stk AS (
-        SELECT item, min(name) AS stk FROM stk GROUP BY item
+        SELECT item::text AS item, min(name::text) AS stk FROM stk GROUP BY item::text
     ), rates AS (
         -- cost is varchar in production and an integer array in some databases.
         -- Extract the first numeric rate from either representation.
-        SELECT stk,
+        SELECT stk::text AS stk,
                max(replace(substring(cost::text from '[-+]?[0-9]+(?:[.,][0-9]+)?'), ',', '.')::numeric) AS hourly_cost
-        FROM stk_cost GROUP BY stk
+        FROM stk_cost GROUP BY stk::text
     ), raw_entries AS (
         SELECT w."YEAR" AS year, w."MONTH" AS month, w."DAY" AS day,
                w.task, w.machine AS item, w.hours::numeric AS hours,
                'machine' AS source, s.stk
-        FROM work_hours w JOIN machine_stk s ON s.item = w.machine
+        FROM work_hours w JOIN machine_stk s ON s.item = w.machine::text
         WHERE s.stk IN ('1', '2', '3', '4', '5')
         UNION ALL
         SELECT "YEAR", "MONTH", "DAY", task, worker, hours::numeric,
                'human', stk::text FROM work_hours_human
-        WHERE stk IN (6, 7)
+        WHERE stk::text IN ('6', '7')
     ), dated AS (
         SELECT *, CASE
             WHEN year BETWEEN 1 AND 9999 AND month BETWEEN 1 AND 12 AND day BETWEEN 1 AND 31
@@ -81,10 +81,10 @@ def list_tasks(db: Session = Depends(get_db)):
     return [row[0] for row in db.execute(text("""
         SELECT DISTINCT task FROM (
             SELECT w.task FROM work_hours w
-            JOIN stk s ON s.item = w.machine
-            WHERE s.name IN ('1', '2', '3', '4', '5')
+            JOIN stk s ON s.item::text = w.machine::text
+            WHERE s.name::text IN ('1', '2', '3', '4', '5')
             UNION ALL
-            SELECT task FROM work_hours_human WHERE stk IN (6, 7)
+            SELECT task FROM work_hours_human WHERE stk::text IN ('6', '7')
         ) AS entries
         WHERE task IS NOT NULL AND btrim(task) <> ''
         ORDER BY task
@@ -138,11 +138,11 @@ def work_hours_summary(
     invalid_rows = db.execute(text("""
         WITH raw_entries AS (
             SELECT w."YEAR" AS year, w."MONTH" AS month, w."DAY" AS day, w.task
-            FROM work_hours w JOIN stk s ON s.item = w.machine
-            WHERE s.name IN ('1', '2', '3', '4', '5')
+            FROM work_hours w JOIN stk s ON s.item::text = w.machine::text
+            WHERE s.name::text IN ('1', '2', '3', '4', '5')
             UNION ALL
             SELECT "YEAR", "MONTH", "DAY", task FROM work_hours_human
-            WHERE stk IN (6, 7)
+            WHERE stk::text IN ('6', '7')
         ), dated AS (
             SELECT *, CASE
                 WHEN year BETWEEN 1 AND 9999 AND month BETWEEN 1 AND 12 AND day BETWEEN 1 AND 31
