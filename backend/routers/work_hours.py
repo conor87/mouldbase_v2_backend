@@ -24,7 +24,11 @@ ENTRIES_SQL = """
     WITH machine_stk AS (
         SELECT item, min(name) AS stk FROM stk GROUP BY item
     ), rates AS (
-        SELECT stk, max(cost[1]) AS hourly_cost FROM stk_cost GROUP BY stk
+        -- cost is varchar in production and an integer array in some databases.
+        -- Extract the first numeric rate from either representation.
+        SELECT stk,
+               max(replace(substring(cost::text from '[-+]?[0-9]+(?:[.,][0-9]+)?'), ',', '.')::numeric) AS hourly_cost
+        FROM stk_cost GROUP BY stk
     ), raw_entries AS (
         SELECT w."YEAR" AS year, w."MONTH" AS month, w."DAY" AS day,
                w.task, w.machine AS item, w.hours::numeric AS hours,
