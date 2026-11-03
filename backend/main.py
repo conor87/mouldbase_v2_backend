@@ -41,6 +41,7 @@ from models.service_guide import ServiceGuide, ServiceGuideStep  # before create
 from routers.service_guides import router as service_guides_router
 from models.settings import SystemSetting  # before create_all
 from routers.settings import router as settings_router
+from routers.work_hours import router as work_hours_router
 from license import license_middleware, router as license_router
 #test
 
@@ -104,6 +105,7 @@ app.include_router(analytics_router)
 app.include_router(mes_session_router)
 app.include_router(service_guides_router)
 app.include_router(settings_router)
+app.include_router(work_hours_router)
 
 def auto_release_assigned_workstations(db: Session, released_at: datetime) -> tuple[int, int, int]:
     production_workstations = (
